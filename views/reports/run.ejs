@@ -1,0 +1,92 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= def.label %></span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/reports">&larr; Back to Reports</a>
+    </div>
+  </div>
+
+  <% if (def.description) { %><p class="admin-help"><%= def.description %></p><% } %>
+
+  <% if (paramFields.length > 0) { %>
+  <form class="detail-form" method="GET" action="/reports/<%= def.key %>">
+    <div class="field-grid">
+      <% paramFields.forEach(function(p){ %>
+        <div class="field-row">
+          <label class="field-label"><%= p.label %></label>
+          <div class="field-value">
+            <% if (p.kind === 'date-range') { %>
+              <span class="filter-date-range">
+                <input type="date" name="<%= p.key %>_from" value="<%= (paramValues[p.key] && paramValues[p.key].from) || '' %>" title="From">
+                &ndash;
+                <input type="date" name="<%= p.key %>_to" value="<%= (paramValues[p.key] && paramValues[p.key].to) || '' %>" title="To">
+              </span>
+            <% } else if (p.kind === 'number-range') { %>
+              <span class="filter-date-range">
+                <input type="number" step="any" name="<%= p.key %>_from" value="<%= (paramValues[p.key] && paramValues[p.key].from) || '' %>" title="Min" placeholder="Min" style="width:90px">
+                &ndash;
+                <input type="number" step="any" name="<%= p.key %>_to" value="<%= (paramValues[p.key] && paramValues[p.key].to) || '' %>" title="Max" placeholder="Max" style="width:90px">
+              </span>
+            <% } else if (p.optionSet && p.optionSet.kind === 'picklist') { %>
+              <select name="<%= p.key %>">
+                <option value="">&mdash; all &mdash;</option>
+                <% p.optionSet.options.forEach(function(opt){ %>
+                  <option value="<%= opt %>" <%= paramValues[p.key] === opt ? 'selected' : '' %>><%= opt %></option>
+                <% }); %>
+              </select>
+            <% } else if (p.optionSet && p.optionSet.kind === 'fk') { %>
+              <select name="<%= p.key %>">
+                <option value="">&mdash; all &mdash;</option>
+                <% p.optionSet.options.forEach(function(opt){ %>
+                  <option value="<%= opt.value %>" <%= paramValues[p.key] === String(opt.value) ? 'selected' : '' %>><%= opt.label %></option>
+                <% }); %>
+              </select>
+            <% } else if (p.fieldType === 'bool') { %>
+              <select name="<%= p.key %>">
+                <option value="">&mdash; all &mdash;</option>
+                <option value="true" <%= paramValues[p.key] === 'true' ? 'selected' : '' %>>Yes</option>
+                <option value="false" <%= paramValues[p.key] === 'false' ? 'selected' : '' %>>No</option>
+              </select>
+            <% } else { %>
+              <input type="text" name="<%= p.key %>" value="<%= paramValues[p.key] || '' %>" placeholder="Exact match&hellip;">
+            <% } %>
+          </div>
+        </div>
+      <% }); %>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Run Report</button></div>
+  </form>
+  <% } %>
+
+  <% if (ran) { %>
+    <% if (result.error) { %>
+      <div class="admin-notice err"><%= result.error %></div>
+    <% } else { %>
+      <div class="applet-toolbar" style="padding:8px 12px;">
+        <a class="btn btn-toolbar btn-mini" href="/reports/<%= def.key %>/export.csv<%= Object.keys(paramValues).length ? '?' + Object.entries(paramValues).map(function(e){ return (typeof e[1] === 'object') ? [e[0]+'_from='+encodeURIComponent(e[1].from||''), e[0]+'_to='+encodeURIComponent(e[1].to||'')].join('&') : e[0]+'='+encodeURIComponent(e[1]); }).join('&') : '' %>">Export CSV</a>
+      </div>
+      <div class="list-table-wrap">
+        <table class="list-table">
+          <thead>
+            <tr><% result.columns.forEach(function(c){ %><th><%= c %></th><% }); %></tr>
+          </thead>
+          <tbody>
+            <% if (result.rows.length === 0) { %>
+              <tr><td colspan="<%= result.columns.length %>" class="empty-row">No matching records.</td></tr>
+            <% } %>
+            <% result.rows.forEach(function(r, i){ %>
+              <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+                <% result.columns.forEach(function(c){ %><td><%= r[c] %></td><% }); %>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  <% } %>
+</div>
+
+<%- include('../partials/foot') %>

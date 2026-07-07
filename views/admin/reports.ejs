@@ -1,0 +1,51 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'reports' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Reports</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/reports/new">+ New Report</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <p class="admin-help">
+    Reports are built from formulas, not code &mdash; every field reference here is a plain string you
+    can edit any time, using the exact same expressions as calculated fields (cross-table references
+    like <code>tenants.T_Client_Name</code>, arithmetic like <code>BILLS_Total - BILLS_RentRecd</code>).
+  </p>
+
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Report</th><th>Base Table</th><th>Mode</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% if (reportDefs.length === 0) { %>
+          <tr><td colspan="4" class="empty-row">No reports yet &mdash; click "+ New Report" to build one.</td></tr>
+        <% } %>
+        <% reportDefs.forEach(function(def, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><strong><%= def.label %></strong><% if (def.description) { %><p class="admin-hint" style="margin:2px 0 0 0;"><%= def.description %></p><% } %></td>
+          <td><code><%= def.baseTable %></code></td>
+          <td><%= def.groupBy ? 'Grouped' : 'Detail' %></td>
+          <td class="nowrap">
+            <a class="btn btn-mini" href="/reports/<%= def.key %>">Run</a>
+            <a class="btn btn-mini" href="/admin/reports/<%= def.key %>/edit">Edit</a>
+            <form method="POST" action="/admin/reports/<%= def.key %>/duplicate" style="display:inline">
+              <button class="btn btn-mini" type="submit">Duplicate</button>
+            </form>
+            <form method="POST" action="/admin/reports/<%= def.key %>/delete" style="display:inline" onsubmit="return confirm('Delete this report? This cannot be undone.');">
+              <button class="btn btn-mini btn-danger" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

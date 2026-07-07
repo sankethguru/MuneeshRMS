@@ -1,0 +1,42 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'backup' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Whole-Database Backup &amp; Restore</span>
+  </div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Download a Backup</span></div>
+  <p class="admin-help">Downloads a ZIP snapshot of everything the app depends on &mdash; the schema (table definitions), all data across every table, all users and permissions, and all uploaded images. Do this before any risky change (bulk imports, structural edits) so you can roll back if needed.</p>
+  <div class="form-actions">
+    <a class="btn btn-primary" href="/admin/backup/download">Download Backup ZIP</a>
+  </div>
+
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Restore From a Backup</span></div>
+  <p class="admin-help"><strong>This replaces everything.</strong> All current data, users, and images are overwritten with what's in the ZIP. The previous state is saved to a timestamped folder under <code>data/.bak-&hellip;/</code> so you can recover manually if the restore was a mistake. You may need to log in again if the users file changed.</p>
+
+  <div class="format-warning">
+    <span class="warn-icon">&#9888;</span>
+    <span class="warn-text">
+      A restore from a ZIP that came from this app's own <strong>Download Backup</strong> above is always safe &mdash;
+      no format warning needed there. The one exception: if you ever open <code>db.json</code>
+      inside the ZIP and hand-edit a value before restoring it, that edit isn't validated.
+      Dates must stay <code>YYYY-MM-DD</code> and percent fields must stay raw fractions
+      (e.g. <code>0.18</code>, not <code>18</code>) if you do this &mdash; the opposite convention
+      from CSV import, since this file mirrors what's stored internally, not what you'd type on a form.
+    </span>
+  </div>
+
+  <form class="detail-form" method="POST" action="/admin/backup/restore" enctype="multipart/form-data" onsubmit="return confirm('Restore will REPLACE ALL data, users, schema, and uploaded images with what is in this ZIP. Continue?');">
+    <div class="field-grid">
+      <div class="field-row"><label class="field-label">Backup ZIP *</label><div class="field-value"><input type="file" name="backupfile" accept=".zip,application/zip" required></div></div>
+    </div>
+    <div class="form-actions"><button class="btn btn-danger" type="submit">Restore</button></div>
+  </form>
+</div>
+
+<%- include('../partials/foot') %>

@@ -1,0 +1,133 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'reports' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= def ? 'Edit Report: ' + def.label : 'New Report' %></span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/reports">&larr; Back to Reports</a>
+    </div>
+  </div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <%
+    var cols = (def ? def.columns : []).concat([{},{},{}]);
+    var params = (def ? def.parameters : []).concat([{},{},{}]);
+    var aggs = (def ? def.aggregates : []).concat([{},{},{}]);
+    var formatOptions = ['none', 'currency', 'percent', 'date', 'datetime'];
+  %>
+
+  <form class="detail-form" method="POST" action="<%= def ? '/admin/reports/' + def.key : '/admin/reports' %>">
+    <div class="field-grid">
+      <div class="field-row">
+        <label class="field-label">Report Name *</label>
+        <div class="field-value"><input type="text" name="label" value="<%= def ? def.label : '' %>" required></div>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Description</label>
+        <div class="field-value"><input type="text" name="description" value="<%= def ? def.description : '' %>" placeholder="Shown on the report list &amp; index"></div>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Base Table *</label>
+        <div class="field-value">
+          <select name="baseTable" <%= def ? 'disabled' : '' %> required>
+            <% Object.values(entities).forEach(function(e){ %>
+              <option value="<%= e.key %>" <%= def && def.baseTable === e.key ? 'selected' : '' %>><%= e.label %> (<%= e.key %>)</option>
+            <% }); %>
+          </select>
+          <% if (def) { %>
+            <input type="hidden" name="baseTable" value="<%= def.baseTable %>">
+            <p class="admin-hint">Base table can't change after creation &mdash; every expression below is written against it. Make a new report instead.</p>
+          <% } %>
+        </div>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Condition (WHERE)</label>
+        <div class="field-value">
+          <input type="text" name="condition" value="<%= def ? def.condition : '' %>" style="width:100%" placeholder="e.g. BILLS_RentRecd &lt; BILLS_Total">
+          <p class="admin-hint">Optional. Same formula syntax as calculated fields &mdash; cross-table references, arithmetic, IF(), etc. Leave blank to include every row.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Columns (Detail Mode)</span></div>
+    <p class="admin-help">Used when Group By below is left blank &mdash; one row per matching record, one column per row here. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder.</p>
+    <table class="list-table reorderable-form">
+      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Column Label</th><th>Format</th></tr></thead>
+      <tbody id="columnsBody">
+        <% cols.forEach(function(c){ %>
+        <tr>
+          <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+          <td><input type="text" name="col_expr[]" value="<%= c.expr || '' %>" style="width:100%" placeholder="e.g. tenants.T_Client_Name"></td>
+          <td><input type="text" name="col_label[]" value="<%= c.label || '' %>" style="width:100%" placeholder="defaults to expression"></td>
+          <td>
+            <select name="col_format[]">
+              <% formatOptions.forEach(function(f){ %><option value="<%= f %>" <%= c.format === f ? 'selected' : '' %>><%= f %></option><% }); %>
+            </select>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('columnsBody')">+ Add Row</button></p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Group By &amp; Aggregates (Grouped Mode)</span></div>
+    <p class="admin-help">Set Group By to switch this report to grouped mode (one row per group, ignores Columns above). Leave blank for detail mode. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder aggregate columns.</p>
+    <div class="field-grid">
+      <div class="field-row">
+        <label class="field-label">Group By</label>
+        <div class="field-value"><input type="text" name="groupBy" value="<%= def ? def.groupBy : '' %>" style="width:100%" placeholder="e.g. tenants.T_Client_Name"></div>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Group Column Label</label>
+        <div class="field-value"><input type="text" name="groupByLabel" value="<%= def ? def.groupByLabel : '' %>" placeholder="e.g. Tenant"></div>
+      </div>
+    </div>
+    <table class="list-table reorderable-form">
+      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Function</th><th>Column Label</th><th>Format</th></tr></thead>
+      <tbody id="aggregatesBody">
+        <% aggs.forEach(function(a){ %>
+        <tr>
+          <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+          <td><input type="text" name="agg_expr[]" value="<%= a.expr || '' %>" style="width:100%" placeholder="e.g. BILLS_Total - BILLS_RentRecd"></td>
+          <td>
+            <select name="agg_fn[]">
+              <% ['SUM','COUNT','AVG','MIN','MAX'].forEach(function(fn){ %><option value="<%= fn %>" <%= a.fn === fn ? 'selected' : '' %>><%= fn %></option><% }); %>
+            </select>
+          </td>
+          <td><input type="text" name="agg_label[]" value="<%= a.label || '' %>" style="width:100%" placeholder="defaults to Fn(expr)"></td>
+          <td>
+            <select name="agg_format[]">
+              <% formatOptions.forEach(function(f){ %><option value="<%= f %>" <%= a.format === f ? 'selected' : '' %>><%= f %></option><% }); %>
+            </select>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('aggregatesBody')">+ Add Row</button></p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Parameters</span></div>
+    <p class="admin-help">Shown as live pickers when someone runs this report &mdash; a landlord/tenant/date/amount they choose at that moment, not fixed by you here. The field's type (bool/picklist/lookup/date/number/currency/percent/text) decides which control they see; other types can't be used as parameters. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder.</p>
+    <table class="list-table reorderable-form">
+      <thead><tr><th style="width:32px"></th><th>Parameter Key *</th><th>Label</th><th>Field *</th></tr></thead>
+      <tbody id="parametersBody">
+        <% params.forEach(function(p){ %>
+        <tr>
+          <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+          <td><input type="text" name="param_key[]" value="<%= p.key || '' %>" placeholder="e.g. tenant"></td>
+          <td><input type="text" name="param_label[]" value="<%= p.label || '' %>" placeholder="e.g. Tenant"></td>
+          <td><input type="text" name="param_field[]" value="<%= p.field || '' %>" style="width:100%" placeholder="e.g. BILLS_ClientCode"></td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('parametersBody')">+ Add Row</button></p>
+
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save Report</button></div>
+  </form>
+</div>
+
+<%- include('../partials/foot') %>

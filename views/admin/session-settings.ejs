@@ -1,0 +1,34 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'session' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Idle Session Timeout</span>
+  </div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <p class="admin-help">
+    Users are automatically signed out after this many minutes of inactivity &mdash; no mouse
+    movement, key presses, or clicks. A warning appears in the last 10 seconds before sign-out,
+    and any activity (including dismissing the warning) resets the clock. This applies to every
+    logged-in user; there's no per-user override.
+  </p>
+
+  <form class="detail-form" method="POST" action="/admin/session-settings">
+    <div class="field-grid">
+      <div class="field-row">
+        <label class="field-label">Timeout (minutes)</label>
+        <div class="field-value">
+          <input type="number" name="minutes" value="<%= minutes %>" min="<%= min %>" max="<%= max %>" step="1" style="width:100px">
+          <p class="admin-hint">Between <%= min %> and <%= max %> minutes.</p>
+        </div>
+      </div>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save</button></div>
+  </form>
+</div>
+
+<%- include('../partials/foot') %>

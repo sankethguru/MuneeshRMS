@@ -1,0 +1,12 @@
+services:
+  muneesh-legacy:
+    build: .
+    container_name: muneesh-legacy
+    ports:
+      - "2299:2299"
+    volumes:
+      - muneesh-legacy-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  muneesh-legacy-data:

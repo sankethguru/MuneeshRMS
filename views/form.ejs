@@ -1,0 +1,263 @@
+<%
+  var recordLabel = isNew ? ('New ' + entity.singular) : display(entity, record);
+  var readOnlyForm = !isNew && !canUpdate;
+%>
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= detailTitle %><%= isNew ? ' (New)' : ' \u2014 ' + record[entity.pk] %></span>
+    <div class="applet-toolbar">
+      <% if (!isNew) { %>
+        <a class="btn btn-toolbar btn-nav" href="<%= prevPk !== null ? '/' + entity.key + '/' + encodeURIComponent(prevPk) : '#' %>" title="Previous record"<% if (prevPk === null) { %> aria-disabled="true"<% } %>>&larr;</a>
+        <a class="btn btn-toolbar btn-nav" href="<%= nextPk !== null ? '/' + entity.key + '/' + encodeURIComponent(nextPk) : '#' %>" title="Next record"<% if (nextPk === null) { %> aria-disabled="true"<% } %>>&rarr;</a>
+      <% } %>
+      <a class="btn btn-toolbar" href="/<%= entity.key %>">&larr; Back to List</a>
+      <a class="btn btn-toolbar" href="/admin/<%= entity.key %>/fields">Edit Fields</a>
+      <% if (!isNew && canDelete) { %>
+        <form method="POST" action="/<%= entity.key %>/<%= encodeURIComponent(record[entity.pk]) %>/delete" onsubmit="return confirm('Delete this record permanently?');" style="display:inline">
+          <button class="btn btn-toolbar btn-danger" type="submit">Delete</button>
+        </form>
+      <% } %>
+    </div>
+  </div>
+
+  <form class="detail-form" method="POST" action="<%= isNew ? '/' + entity.key : '/' + entity.key + '/' + encodeURIComponent(record[entity.pk]) %>" enctype="multipart/form-data">
+    <div class="field-grid">
+      <% entity.fields.forEach(function(f){ %>
+        <% if (f.type === 'spacer') { %>
+          <div class="field-row spacer-row" aria-hidden="true"></div>
+        <% } else if (f.type === 'section') { %>
+          <div class="field-row section-row"><h4 class="section-header"><%= f.label %></h4></div>
+        <% } else { %>
+        <div class="field-row">
+          <label class="field-label" for="fld_<%= f.name %><%= (f.type === 'currency' || f.type === 'percent') ? '_disp' : '' %>"><%= f.label %><%= f.required ? ' *' : '' %></label>
+          <div class="field-value">
+            <%
+              var val = record[f.name];
+              var isLocked = (f.key && (!isNew || f.auto)) || readOnlyForm;
+            %>
+            <% if (f.type === 'formula' || f.type === 'rollup') { %>
+              <input type="text" class="formula-display" value="<%= formatFormulaValue(f, val) %>" readonly title="<%= f.type === 'rollup' ? (f.rollupFn + ' of ' + f.rollupField + ' via ' + (f.rollupHop2Entity || f.rollupHop1Entity)) : ('Calculated: ' + f.formula) %>">
+            <% } else if (f.type === 'series') { %>
+              <input type="text" class="formula-display" value="<%= isNew ? '(assigned on save)' : val %>" readonly title="Auto-numbered series">
+            <% } else if (f.type === 'picklist') { %>
+              <select id="fld_<%= f.name %>" name="<%= f.name %>" <%= readOnlyForm ? 'disabled' : '' %>>
+                <option value="">&mdash; none &mdash;</option>
+                <% picklistOptions(f).forEach(function(opt){ %>
+                  <option value="<%= opt %>" <%= (String(val) === opt) ? 'selected' : '' %>><%= opt %></option>
+                <% }); %>
+              </select>
+            <% } else if (f.type === 'fk') { %>
+              <select id="fld_<%= f.name %>" name="<%= f.name %>" <%= readOnlyForm ? 'disabled' : '' %>>
+                <option value="">&mdash; none &mdash;</option>
+                <% (fkOptions[f.name] || []).forEach(function(opt){ %>
+                  <option value="<%= opt.value %>" <%= (String(val) === String(opt.value)) ? 'selected' : '' %>><%= opt.label %></option>
+                <% }); %>
+              </select>
+            <% } else if (f.type === 'bool') { %>
+              <input type="checkbox" id="fld_<%= f.name %>" name="<%= f.name %>" <%= val ? 'checked' : '' %> <%= readOnlyForm ? 'disabled' : '' %>>
+            <% } else if (f.type === 'textarea') { %>
+              <textarea id="fld_<%= f.name %>" name="<%= f.name %>" rows="<%= f.rows || 2 %>" <%= readOnlyForm ? 'readonly' : '' %>><%= val %></textarea>
+            <% } else if (f.type === 'date') { %>
+              <input type="date" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= val %>" <%= readOnlyForm ? 'readonly' : '' %>>
+            <% } else if (f.type === 'timestamp') { %>
+              <input type="datetime-local" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= (val || '').toString().slice(0,16) %>" <%= readOnlyForm ? 'readonly' : '' %>>
+            <% } else if (f.type === 'currency') { %>
+              <input type="hidden" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= val %>">
+              <input type="text" inputmode="decimal" class="currency-field" id="fld_<%= f.name %>_disp" value="<%= formatINR(val) %>"
+                     onfocus="mlCurrencyFocus('<%= f.name %>')" oninput="mlCurrencySync('<%= f.name %>')" onblur="mlCurrencyBlur('<%= f.name %>')"
+                     <%= isLocked ? 'readonly' : '' %>>
+            <% } else if (f.type === 'percent') { %>
+              <input type="hidden" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= val %>">
+              <input type="text" inputmode="decimal" class="currency-field" id="fld_<%= f.name %>_disp" value="<%= formatPercent(val) %>"
+                     onfocus="mlPercentFocus('<%= f.name %>')" oninput="mlPercentSync('<%= f.name %>')" onblur="mlPercentBlur('<%= f.name %>')"
+                     <%= isLocked ? 'readonly' : '' %>>
+            <% } else if (f.type === 'number') { %>
+              <input type="number" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= val %>" <%= isLocked ? 'readonly' : '' %>>
+            <% } else if (f.type === 'image') { %>
+              <div class="image-field">
+                <% if (val) { %>
+                  <img class="image-thumb" src="/uploads/<%= entity.key %>/<%= f.name %>/<%= val %>" alt="<%= f.label %>">
+                <% } %>
+                <% if (!readOnlyForm) { %>
+                  <input type="file" id="fld_<%= f.name %>" name="img_<%= f.name %>" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml">
+                  <% if (val) { %>
+                    <label class="image-clear"><input type="checkbox" name="__clear_<%= f.name %>"> Clear image</label>
+                  <% } %>
+                <% } %>
+              </div>
+            <% } else { %>
+              <input type="text" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= val %>" <%= isLocked ? 'readonly' : '' %> <%= f.required ? 'required' : '' %>>
+            <% } %>
+          </div>
+        </div>
+        <% } %>
+      <% }); %>
+    </div>
+
+    <% if (!readOnlyForm) { %>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit"><%= isNew ? 'Create Record' : 'Save Changes' %></button>
+    </div>
+    <% } else { %>
+    <p class="admin-hint" style="display:block;padding:10px 4px;">You have read-only access to this table.</p>
+    <% } %>
+  </form>
+</div>
+
+<% /* Payment records: show a scannable UPI QR right on the detail page. Generated
+      server-side (no third-party dependency), reflects the stored payee, amount,
+      and notes. Also add a create-time helper that pre-fills the Notes box with
+      the payee's narration template as soon as a payee is picked.
+
+      Field names below come from payqrConfig (computed server-side from
+      Admin -> PayQR Settings), not assumed — only the table identity check
+      (entity.key === 'payments') is still fixed. ###HARDCODED FIELDS###
+      applies to that one check; see payqr.js for why table identity is a
+      deliberate, separate scope boundary from field names. */ %>
+<% if (!isNew && entity.key === 'payments' && payqrConfig && record[payqrConfig.payeeFkField]) { %>
+  <div class="applet-shell">
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Scan to Pay</span></div>
+    <div style="padding: 16px; text-align: center;" id="payqr-qr-box">
+      <img src="/api/payment-qr/<%= record[entity.pk] %>.png" alt="UPI QR code" style="max-width: 320px; border: 1px solid var(--border-dark); background: white; padding: 8px;"
+           onerror="this.parentElement.querySelector('.payqr-error') ? null : (async () => {
+             const r = await fetch(this.src);
+             const msg = await r.text();
+             this.style.display = 'none';
+             const p = document.createElement('p');
+             p.className = 'payqr-error admin-notice err';
+             p.style.textAlign = 'left';
+             p.textContent = msg;
+             this.insertAdjacentElement('afterend', p);
+           })()">
+      <p class="admin-hint" style="margin-top: 8px;">Scan with any UPI app (GPay, PhonePe, Paytm). Payee, amount, and note are pre-filled from this record.</p>
+    </div>
+  </div>
+<% } %>
+<% if (isNew && entity.key === 'payments' && payqrConfig) { %>
+  <script>
+    // When user picks a payee, fetch its narration template with {{PREV_MONTH}}
+    // resolved to last month's short name, and drop it into the Notes field.
+    // The user can then edit before saving. Snapshot approach — the note is
+    // stored on the payment as plain text, so historical records stay accurate
+    // even if the payee's template changes later.
+    document.addEventListener('DOMContentLoaded', function () {
+      var payeeSel = document.querySelector('[name="<%= payqrConfig.payeeFkField %>"]');
+      var notesEl = document.querySelector('[name="<%= payqrConfig.notesField %>"]');
+      if (!payeeSel || !notesEl) return;
+      payeeSel.addEventListener('change', function () {
+        var name = payeeSel.value;
+        if (!name) return;
+        // Only auto-fill when Notes is empty so we don't clobber user edits.
+        if (notesEl.value && notesEl.value.trim()) return;
+        fetch('/api/payee-narration/' + encodeURIComponent(name))
+          .then(function (r) { return r.json(); })
+          .then(function (d) { if (d && d.narration) notesEl.value = d.narration; });
+      });
+    });
+  </script>
+<% } %>
+
+<% if (!isNew) { children.forEach(function(child, childIdx){ %>
+  <% var childTableId = 'applet-' + childIdx + '-' + child.entity.key; %>
+  <% var CHILD_EXPAND_THRESHOLD = 12; %>
+  <div class="applet-shell child-applet">
+    <div class="applet-titlebar applet-titlebar-child">
+      <span class="applet-title"><%= child.cfg.label %></span>
+      <div class="applet-toolbar">
+        <a class="btn btn-toolbar btn-mini" href="/<%= child.entity.key %>/new/form">+ New <%= child.entity.singular %></a>
+      </div>
+    </div>
+    <div class="list-table-wrap">
+      <table class="list-table" id="<%= childTableId %>">
+        <thead>
+          <tr>
+            <% child.listFields.forEach(function(f){ %>
+              <th><%= f.label %></th>
+            <% }); %>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (child.rows.length === 0) { %>
+            <tr><td colspan="<%= child.listFields.length %>" class="empty-row">No related records.</td></tr>
+          <% } %>
+          <% child.rows.forEach(function(r, i){ %>
+            <tr class="data-row <%= i % 2 === 0 ? 'row-even' : 'row-odd' %> <%= i >= CHILD_EXPAND_THRESHOLD ? 'row-collapsed' : '' %>" style="<%= i >= CHILD_EXPAND_THRESHOLD ? 'display:none' : '' %>" onclick="location.href='/<%= child.entity.key %>/<%= encodeURIComponent(r[child.entity.pk]) %>'">
+              <% child.listFields.forEach(function(f, ci){ %>
+                <td>
+                  <% var val = r[f.name]; %>
+                  <% if (typeof val === 'boolean') { %>
+                    <span class="bool-flag <%= val ? 'bool-yes' : 'bool-no' %>"><%= val ? 'Y' : 'N' %></span>
+                  <% } else if (f.type === 'currency') { %>
+                    <span class="currency-val"><%= formatINR(val) %></span>
+                  <% } else if (f.type === 'percent') { %>
+                    <span class="currency-val"><%= formatPercent(val) %></span>
+                  <% } else if (f.type === 'image') { %>
+                    <% if (val) { %><img class="image-thumb-mini" src="/uploads/<%= child.entity.key %>/<%= f.name %>/<%= val %>" alt=""><% } %>
+                  <% } else if (f.type === 'date') { %>
+                    <%= formatDate(val, false) %>
+                  <% } else if (f.type === 'timestamp') { %>
+                    <%= formatDate(val, true) %>
+                  <% } else if (f.type === 'formula' || f.type === 'rollup') { %>
+                    <%= formatFormulaValue(f, val) %>
+                  <% } else if (ci === 0) { %>
+                    <a class="cell-link" href="/<%= child.entity.key %>/<%= encodeURIComponent(r[child.entity.pk]) %>"><%= val %></a>
+                  <% } else { %>
+                    <%= val %>
+                  <% } %>
+                </td>
+              <% }); %>
+            </tr>
+          <% }); %>
+        </tbody>
+      </table>
+      <% if (child.rows.length > CHILD_EXPAND_THRESHOLD) { %>
+        <div class="expand-row-wrap">
+          <button class="btn btn-mini expand-toggle" type="button" data-target="<%= childTableId %>" data-more-label="Show all <%= child.rows.length %> records (<%= child.rows.length - CHILD_EXPAND_THRESHOLD %> more)" data-less-label="Show fewer" onclick="mlToggleExpand(this)">Show all <%= child.rows.length %> records (<%= child.rows.length - CHILD_EXPAND_THRESHOLD %> more)</button>
+        </div>
+      <% } %>
+    </div>
+  </div>
+<% }); } %>
+
+<% if (!isNew && entity.auditEnabled) { %>
+  <div class="applet-shell child-applet">
+    <div class="applet-titlebar applet-titlebar-child">
+      <span class="applet-title">History (Audit Trail)</span>
+    </div>
+    <div class="list-table-wrap">
+      <table class="list-table">
+        <thead><tr><th>Time</th><th>Action</th><th>User</th><th>Changes</th></tr></thead>
+        <tbody>
+          <% if (auditEntries.length === 0) { %>
+            <tr><td colspan="4" class="empty-row">No history recorded yet.</td></tr>
+          <% } %>
+          <% auditEntries.forEach(function(e, i){ %>
+            <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+              <td class="nowrap"><%
+                var ds = e.ts.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+              %><%= ds ? (ds[3] + '-' + ds[2] + '-' + ds[1] + ' ' + ds[4] + ':' + ds[5] + ':' + ds[6]) : e.ts.replace('T', ' ').slice(0, 19) %></td>
+              <td>
+                <% if (e.action === 'create') { %><span class="bool-flag bool-yes">NEW</span>
+                <% } else if (e.action === 'delete') { %><span class="bool-flag" style="background:#f4e3e3;color:#7c2222;border:1px solid #d2a5a5;">DEL</span>
+                <% } else { %><span class="bool-flag" style="background:#e3edf7;color:#1a4a8a;border:1px solid #a9c5e6;">UPD</span><% } %>
+              </td>
+              <td><%= e.user %></td>
+              <td>
+                <% if (e.changes && e.changes.length) { %>
+                  <% e.changes.forEach(function(c){ %>
+                    <div class="audit-change"><strong><%= c.field %>:</strong> <span class="audit-before"><%= c.before %></span> &rarr; <span class="audit-after"><%= c.after %></span></div>
+                  <% }); %>
+                <% } else { %><span class="admin-hint">&mdash;</span><% } %>
+              </td>
+            </tr>
+          <% }); %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+<% } %>
+
+<%- include('partials/foot') %>

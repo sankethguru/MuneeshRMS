@@ -1,0 +1,41 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'tables' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= entity.label %> &mdash; Settings</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/admin/<%= entity.key %>/fields">Fields</a>
+      <a class="btn btn-toolbar" href="/admin">&larr; Back to Admin</a>
+    </div>
+  </div>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <form class="detail-form" method="POST" action="/admin/<%= entity.key %>/settings">
+    <div class="field-grid">
+      <div class="field-row"><label class="field-label">Screen Label</label><div class="field-value"><input type="text" name="label" value="<%= entity.label %>"></div></div>
+      <div class="field-row"><label class="field-label">Singular Label</label><div class="field-value"><input type="text" name="singular" value="<%= entity.singular %>"></div></div>
+      <div class="field-row"><label class="field-label">Table Key</label><div class="field-value"><input type="text" value="<%= entity.key %>" readonly></div></div>
+      <div class="field-row"><label class="field-label">Primary Key Field</label><div class="field-value"><input type="text" value="<%= entity.pk %>" readonly></div></div>
+      <div class="field-row"><label class="field-label">Display Field</label><div class="field-value">
+        <select name="displayField">
+          <option value="">&mdash; use primary key &mdash;</option>
+          <% entity.fields.forEach(function(f){ %>
+            <option value="<%= f.name %>" <%= entity.displayField===f.name ? 'selected' : '' %>><%= f.label %></option>
+          <% }); %>
+        </select>
+      </div></div>
+      <div class="field-row"><label class="field-label">Display Prefix</label><div class="field-value"><input type="text" name="displayPrefix" value="<%= entity.displayPrefix || '' %>" placeholder="e.g. Bill #"></div></div>
+      <div class="field-row"><label class="field-label">List Applet Title</label><div class="field-value"><input type="text" name="listTitle" value="<%= entity.listTitle || '' %>" placeholder="<%= entity.label %> List"></div></div>
+      <div class="field-row"><label class="field-label">Detail Applet Title</label><div class="field-value"><input type="text" name="detailTitle" value="<%= entity.detailTitle || '' %>" placeholder="<%= entity.singular %> Detail"></div></div>
+      <div class="field-row"><label class="field-label">Audit Trail</label><div class="field-value">
+        <input type="checkbox" name="auditEnabled" <%= entity.auditEnabled ? 'checked' : '' %>> <span class="admin-hint">log every create/update/delete on this table, with a History section on each record</span>
+      </div></div>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save Settings</button></div>
+  </form>
+  <p class="admin-help">The Display Field controls how records from this table are labeled when they appear as a lookup option on other screens (e.g. a Tenant picking its Landlord). Use Display Prefix for tables without a good name field, like Bills ("Bill #3").</p>
+</div>
+
+<%- include('../partials/foot') %>

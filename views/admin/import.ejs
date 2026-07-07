@@ -1,0 +1,61 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'tables' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= entity.label %> &mdash; Import Data (CSV)</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/admin/<%= entity.key %>/export-schema.csv">Download Template</a>
+      <a class="btn btn-toolbar" href="/admin">&larr; Back to Admin</a>
+    </div>
+  </div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <div class="format-warning">
+    <span class="warn-icon">&#9888;</span>
+    <span class="warn-text">
+      Mandatory formats — the import does <strong>not</strong> convert or validate these:
+      dates must be typed as <code>YYYY-MM-DD</code> (e.g. <code>2026-07-05</code>), and
+      percent fields must be entered as the whole number (<code>18</code> for 18%),
+      never a decimal fraction (<code>0.18</code>). A wrong format is stored exactly as typed &mdash;
+      it won't be caught or fixed automatically.
+    </span>
+  </div>
+
+  <form class="detail-form" method="POST" action="/admin/<%= entity.key %>/import" enctype="multipart/form-data">
+    <div class="field-grid">
+      <div class="field-row"><label class="field-label">CSV File *</label><div class="field-value"><input type="file" name="csvfile" accept=".csv,text/csv" required></div></div>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Import</button></div>
+  </form>
+
+  <p class="admin-help">This <strong>only creates new records</strong> &mdash; it does not update existing ones. If any row's primary key (<code><%= entity.pk %></code>) already matches a record already in <%= entity.label %>, or appears twice in the file, the <strong>entire import is cancelled and nothing is added</strong>. <% var autoPk = entity.fields.find(f => f.key); %><% if (autoPk && autoPk.auto) { %>Leave <code><%= entity.pk %></code> blank on a row to have a new ID assigned automatically.<% } %></p>
+
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Expected Columns</span></div>
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Column (CSV header)</th><th>Label</th><th>Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <% fields.forEach(function(f, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><code><%= f.name %></code></td>
+          <td><%= f.label %></td>
+          <td><%= f.type %><%= f.key ? ' (primary key)' : '' %></td>
+          <td>
+            <% if (f.type === 'bool') { %>yes / no / true / false / 1 / 0
+            <% } else if (f.type === 'percent') { %>enter the whole number, e.g. 18 for 18%
+            <% } else if (f.type === 'fk') { %>the linked table's code/ID value
+            <% } else if (f.type === 'date') { %>YYYY-MM-DD
+            <% } else { %>&mdash;<% } %>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

@@ -1,0 +1,31 @@
+<%- include('partials/head') %>
+
+<div class="masthead">
+  <div class="masthead-brand">
+    <span class="brand-mark">ML</span>
+    <span class="brand-name">Muneesh Legacy</span>
+  </div>
+  <div class="masthead-meta">Rental &amp; Property Management &mdash; Enterprise Edition</div>
+</div>
+
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-card-title">Sign In</div>
+    <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+    <form method="POST" action="/login">
+      <input type="hidden" name="next" value="<%= nextUrl || '' %>">
+      <div class="field-row login-field">
+        <label class="field-label" for="username">Username</label>
+        <div class="field-value"><input type="text" id="username" name="username" autocomplete="username" required autofocus></div>
+      </div>
+      <div class="field-row login-field">
+        <label class="field-label" for="password">Password</label>
+        <div class="field-value"><input type="password" id="password" name="password" autocomplete="current-password" required></div>
+      </div>
+      <div class="form-actions"><button class="btn btn-primary" type="submit" style="width:100%">Sign In</button></div>
+    </form>
+    <p class="admin-hint" style="display:block;margin-top:10px;">Default account: <code>admin</code> / <code>admin123</code> &mdash; change the password after first login.</p>
+  </div>
+</div>
+
+<%- include('partials/foot') %>

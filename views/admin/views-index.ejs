@@ -1,0 +1,27 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'views' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Views &mdash; List Column Configuration</span>
+  </div>
+  <p class="admin-help" style="padding-top:10px;">Pick a table to choose which fields show as columns on its List screen, their order, and the default sort &mdash; independent of the field order used on the record Detail form (that's set under Fields).</p>
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Table</th><th>List Columns</th><th>Default Sort</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% rows.forEach(function(e, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><strong><%= e.label %></strong></td>
+          <td><%= (e.listColumns || []).length %> column<%= (e.listColumns || []).length === 1 ? '' : 's' %></td>
+          <td><%= e.sortField ? (e.fields.find(f => f.name === e.sortField) || {}).label + ' (' + e.sortDir + ')' : '\u2014 insertion order \u2014' %></td>
+          <td><a class="btn btn-mini" href="/admin/<%= e.key %>/views">Configure</a></td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

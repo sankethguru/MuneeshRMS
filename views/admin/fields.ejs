@@ -1,0 +1,253 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'tables' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= entity.label %> &mdash; Fields</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/admin/<%= entity.key %>/settings">Settings</a>
+      <a class="btn btn-toolbar" href="/admin">&larr; Back to Admin</a>
+    </div>
+  </div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <!-- One empty form per field, bound to inputs in the table below via the
+       HTML "form" attribute (avoids illegal <form> nesting inside <table>). -->
+  <% entity.fields.forEach(function(f){ %>
+    <form id="save-<%= f.name %>" method="POST" action="/admin/<%= entity.key %>/fields/<%= f.name %>"></form>
+  <% }); %>
+
+  <div class="list-table-wrap">
+    <table class="list-table admin-fields-table reorderable">
+      <thead>
+        <tr><th style="width:32px"></th><th>Field Name</th><th>Label</th><th>Type</th><th>Config</th><th>Req'd</th><th>&nbsp;</th></tr>
+      </thead>
+      <tbody data-reorder-url="/admin/<%= entity.key %>/fields/reorder">
+        <% entity.fields.forEach(function(f){ %>
+        <tr data-item-id="<%= f.name %>" class="<%= f.key ? 'row-not-draggable' : '' %>">
+          <td class="<%= f.key ? '' : 'drag-handle' %>" title="<%= f.key ? 'Primary key stays first' : 'Drag to reorder' %>">
+            <% if (f.key) { %>
+              <span class="bool-flag bool-yes" title="Primary key">PK</span>
+            <% } else { %>
+              &#x2630;
+            <% } %>
+          </td>
+          <td><code><%= f.name %></code></td>
+          <td><input type="text" form="save-<%= f.name %>" name="label" value="<%= f.label %>" style="width:140px"></td>
+          <td>
+            <% if (f.key) { %>
+              <span><%= f.type %><%= f.auto ? ' (auto)' : '' %></span>
+            <% } else { %>
+              <select form="save-<%= f.name %>" name="type" onchange="mlToggleFieldConfig('<%= f.name %>', this.value)">
+                <% fieldTypes.forEach(function(t){ %>
+                  <option value="<%= t %>" <%= f.type===t ? 'selected' : '' %>><%= t %></option>
+                <% }); %>
+              </select>
+            <% } %>
+          </td>
+          <td>
+            <% if (f.key) { %>
+              &mdash;
+            <% } else { %>
+              <span id="cfg-ref-<%= f.name %>" class="field-config" style="<%= f.type === 'fk' ? '' : 'display:none' %>">
+                <select form="save-<%= f.name %>" name="ref">
+                  <option value="">&mdash; table &mdash;</option>
+                  <% fkTargets.forEach(function(t){ %>
+                    <option value="<%= t.key %>" <%= f.ref===t.key ? 'selected' : '' %>><%= t.label %></option>
+                  <% }); %>
+                </select>
+              </span>
+              <span id="cfg-rows-<%= f.name %>" class="field-config" style="<%= f.type === 'textarea' ? '' : 'display:none' %>">
+                <input type="number" form="save-<%= f.name %>" name="rows" min="1" max="20" value="<%= f.rows || 2 %>" style="width:52px" title="Text box height (rows)"> rows
+              </span>
+              <span id="cfg-formula-<%= f.name %>" class="field-config" style="<%= f.type === 'formula' ? '' : 'display:none' %>">
+                <input type="text" form="save-<%= f.name %>" name="formula" value="<%= f.formula || '' %>" placeholder="e.g. T_Invoice_Value * T_Share / 100 or tenants.T_Invoice_Value" style="width:240px"><br>
+                Format as:
+                <select form="save-<%= f.name %>" name="format" <%= f.type !== 'formula' ? 'disabled' : '' %>>
+                  <option value="none" <%= f.format==='none' ? 'selected' : '' %>>Plain</option>
+                  <option value="currency" <%= f.format==='currency' ? 'selected' : '' %>>Currency (&#8377;)</option>
+                  <option value="percent" <%= f.format==='percent' ? 'selected' : '' %>>Percent (%)</option>
+                  <option value="date" <%= f.format==='date' ? 'selected' : '' %>>Date</option>
+                  <option value="datetime" <%= f.format==='datetime' ? 'selected' : '' %>>Date &amp; Time</option>
+                </select>
+              </span>
+              <span id="cfg-rollup-<%= f.name %>" class="field-config series-config" style="<%= f.type === 'rollup' ? '' : 'display:none' %>">
+                <label>Function
+                  <select form="save-<%= f.name %>" name="rollupFn">
+                    <% ['SUM','COUNT','AVG','MIN','MAX','LATEST'].forEach(function(fn){ %><option value="<%= fn %>" <%= f.rollupFn===fn ? 'selected' : '' %>><%= fn %></option><% }); %>
+                  </select>
+                </label>
+                <label>Roll up
+                  <select form="save-<%= f.name %>" name="rollupHop1Entity">
+                    <option value="">&mdash; related table &mdash;</option>
+                    <% childOptions.forEach(function(t){ %><option value="<%= t.key %>" <%= f.rollupHop1Entity===t.key ? 'selected' : '' %>><%= t.label %></option><% }); %>
+                  </select>
+                </label>
+                <label>...then via (optional 2nd hop)
+                  <select form="save-<%= f.name %>" name="rollupHop2Entity">
+                    <option value="">&mdash; none, stop at 1st table &mdash;</option>
+                    <% allEntities.forEach(function(t){ %><option value="<%= t.key %>" <%= f.rollupHop2Entity===t.key ? 'selected' : '' %>><%= t.label %></option><% }); %>
+                  </select>
+                </label>
+                <label>Field to aggregate <input type="text" form="save-<%= f.name %>" name="rollupField" value="<%= f.rollupField || '' %>" placeholder="BILLS_Total" style="width:120px"></label>
+                <label>Order by (LATEST only) <input type="text" form="save-<%= f.name %>" name="rollupOrderField" value="<%= f.rollupOrderField || '' %>" placeholder="PAY_Date" style="width:120px"></label>
+                <label style="flex-basis:100%">WHERE (optional) <input type="text" form="save-<%= f.name %>" name="rollupWhere" value="<%= f.rollupWhere || '' %>" placeholder="FY(BILLS_BillDate) = CURRENT_FY() AND BILLS_Total > parent.LL_CreditLimit" style="width:420px"></label>
+                <label>Format as:
+                  <select form="save-<%= f.name %>" name="format" <%= f.type !== 'rollup' ? 'disabled' : '' %>>
+                    <option value="none" <%= f.format==='none' ? 'selected' : '' %>>Plain</option>
+                    <option value="currency" <%= f.format==='currency' ? 'selected' : '' %>>Currency (&#8377;)</option>
+                    <option value="percent" <%= f.format==='percent' ? 'selected' : '' %>>Percent (%)</option>
+                    <option value="date" <%= f.format==='date' ? 'selected' : '' %>>Date</option>
+                    <option value="datetime" <%= f.format==='datetime' ? 'selected' : '' %>>Date &amp; Time</option>
+                  </select>
+                </label>
+              </span>
+              <span id="cfg-options-<%= f.name %>" class="field-config" style="<%= f.type === 'picklist' ? '' : 'display:none' %>">
+                <input type="text" form="save-<%= f.name %>" name="options" value="<%= f.options || '' %>" placeholder="e.g. Active,Inactive,Pending" style="width:220px">
+              </span>
+              <span id="cfg-series-<%= f.name %>" class="field-config series-config" style="<%= f.type === 'series' ? '' : 'display:none' %>">
+                <label>Group path <input type="text" form="save-<%= f.name %>" name="seriesGroupPath" value="<%= f.seriesGroupPath || '' %>" placeholder="BILLS_ClientCode.T_MappedTo" style="width:190px"></label>
+                <label>Tracker table
+                  <select form="save-<%= f.name %>" name="seriesTrackerEntity">
+                    <option value="">&mdash;</option>
+                    <% fkTargets.forEach(function(t){ %><option value="<%= t.key %>" <%= f.seriesTrackerEntity===t.key ? 'selected' : '' %>><%= t.label %></option><% }); %>
+                  </select>
+                </label>
+                <label>Group field <input type="text" form="save-<%= f.name %>" name="seriesTrackerGroupField" value="<%= f.seriesTrackerGroupField || '' %>" placeholder="BS_Landlord" style="width:110px"></label>
+                <label>Counter field <input type="text" form="save-<%= f.name %>" name="seriesTrackerCounterField" value="<%= f.seriesTrackerCounterField || '' %>" placeholder="BS_LastNumber" style="width:110px"></label>
+              </span>
+              <% if (!['fk','textarea','formula','picklist','series','rollup'].includes(f.type)) { %><span id="cfg-none-<%= f.name %>">&mdash;</span><% } %>
+            <% } %>
+          </td>
+          <td class="center"><input type="checkbox" form="save-<%= f.name %>" name="required" <%= f.required ? 'checked' : '' %> <%= (f.key || f.type==='formula' || f.type==='series' || f.type==='rollup' || f.type==='spacer' || f.type==='section') ? 'disabled' : '' %>></td>
+          <td class="nowrap">
+            <button class="btn btn-mini" type="submit" form="save-<%= f.name %>">Save</button>
+            <% if (!f.key) { %>
+              <form method="POST" action="/admin/<%= entity.key %>/fields/<%= f.name %>/delete" style="display:inline" onsubmit="return confirm('Delete field &quot;<%= f.label %>&quot;? Existing data in this column will be hidden, not erased.');">
+                <button class="btn btn-mini btn-danger" type="submit">Delete</button>
+              </form>
+            <% } %>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+  <p class="admin-help">Type <strong>formula</strong> creates a read-only calculated field. Its Config box takes an expression referencing other field names on this table directly (e.g. <code>T_Invoice_Value * T_Share / 100</code>), a linked table via <code>tablename.FieldName</code> (e.g. <code>tenants.T_Invoice_Value</code>), quoted text (<code>"like this"</code>), infix <code>AND</code> / <code>OR</code> / <code>NOT</code> between conditions (write <code>=</code> for equality &mdash; it's converted automatically), and functions: <code>IF IFERROR ISBLANK ROUND ROUNDUP ROUNDDOWN ABS MIN MAX SUM TODAY YEAR MONTH DAY DAYS CONCAT LEFT RIGHT MID LEN UPPER LOWER TRIM FY CURRENT_FY</code>, plus <code>LOOKUP("table", "condition", "returnField")</code> to scan any table &mdash; e.g. <code>LOOKUP("gst_calendar", "gst_calendar.GST_Month = MONTH(BILLS_BillDate) AND gst_calendar.GST_Year = YEAR(BILLS_BillDate)", "GST_Rate")</code>. LOOKUP errors visibly (never guesses) if there's no match or more than one. Type <strong>rollup</strong> aggregates a related table's records (optionally two hops away, e.g. a Landlord summing Bills through Tenants) with an optional WHERE expression &mdash; bare names refer to the row being aggregated, <code>parent.FieldName</code> refers back to this record. Type <strong>currency</strong> stores a plain number but displays it as &#8377;x,xx,xxx.xx everywhere; <strong>percent</strong> stores the raw fraction (0.18) and displays it &times;100 with a % sign (18%) &mdash; type the whole number (18) and it converts automatically. Type <strong>picklist</strong> shows a dropdown of admin-defined options (comma-separated). Type <strong>series</strong> auto-assigns a running number scoped to a group (e.g. one continuous sequence per landlord) using a tracker table you point it at. Type <strong>textarea</strong>'s Config box sets its height in rows. Types <strong>spacer</strong> (leave the label blank) and <strong>section</strong> (label becomes a header) are layout-only &mdash; they hold no data, are never saved, and never appear in Views or CSV export/import &mdash; use them to arrange or group fields on a busy Detail screen.</p>
+
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Add New Field</span></div>
+  <form class="detail-form" method="POST" action="/admin/<%= entity.key %>/fields">
+    <div class="field-grid">
+      <div class="field-row"><label class="field-label">Field Name *</label><div class="field-value"><input type="text" name="name" placeholder="e.g. VEN_Contact" required></div></div>
+      <div class="field-row"><label class="field-label">Label</label><div class="field-value"><input type="text" name="label" placeholder="e.g. Contact Person (leave blank for a Spacer)"></div></div>
+      <div class="field-row"><label class="field-label">Type</label><div class="field-value">
+        <select name="type" onchange="mlToggleNewFieldConfig(this.value)">
+          <% fieldTypes.forEach(function(t){ %><option value="<%= t %>"><%= t %></option><% }); %>
+        </select>
+      </div></div>
+      <div class="field-row" id="newFieldRefRow" style="display:none">
+        <label class="field-label">Links To</label>
+        <div class="field-value">
+          <select name="ref">
+            <option value="">&mdash; choose a table &mdash;</option>
+            <% fkTargets.forEach(function(t){ %><option value="<%= t.key %>"><%= t.label %></option><% }); %>
+          </select>
+        </div>
+      </div>
+      <div class="field-row" id="newFieldRowsRow" style="display:none">
+        <label class="field-label">Height (rows)</label>
+        <div class="field-value"><input type="number" name="rows" min="1" max="20" value="2" style="width:60px"></div>
+      </div>
+      <div class="field-row" id="newFieldFormulaRow" style="display:none">
+        <label class="field-label">Formula</label>
+        <div class="field-value"><input type="text" name="formula" placeholder="e.g. T_Invoice_Value * T_Share / 100 or tenants.T_Invoice_Value"></div>
+      </div>
+      <div class="field-row" id="newFieldFormatRow" style="display:none">
+        <label class="field-label">Format As</label>
+        <div class="field-value">
+          <select name="format">
+            <option value="none">Plain</option>
+            <option value="currency">Currency (&#8377;)</option>
+            <option value="percent">Percent (%)</option>
+            <option value="date">Date</option>
+            <option value="datetime">Date &amp; Time</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row" id="newFieldOptionsRow" style="display:none">
+        <label class="field-label">Options (comma-separated)</label>
+        <div class="field-value"><input type="text" name="options" placeholder="e.g. Active,Inactive,Pending"></div>
+      </div>
+      <div class="field-row" id="newFieldSeriesRow" style="display:none">
+        <label class="field-label">Series Config</label>
+        <div class="field-value series-config">
+          <label>Group path <input type="text" name="seriesGroupPath" placeholder="BILLS_ClientCode.T_MappedTo" style="width:190px"></label>
+          <label>Tracker table
+            <select name="seriesTrackerEntity">
+              <option value="">&mdash; choose a table &mdash;</option>
+              <% fkTargets.forEach(function(t){ %><option value="<%= t.key %>"><%= t.label %></option><% }); %>
+              <option value="<%= entity.key %>"><%= entity.label %> (this table)</option>
+            </select>
+          </label>
+          <label>Group field <input type="text" name="seriesTrackerGroupField" placeholder="BS_Landlord" style="width:110px"></label>
+          <label>Counter field <input type="text" name="seriesTrackerCounterField" placeholder="BS_LastNumber" style="width:110px"></label>
+        </div>
+      </div>
+      <div class="field-row" id="newFieldRollupRow" style="display:none">
+        <label class="field-label">Rollup Config</label>
+        <div class="field-value series-config">
+          <label>Function
+            <select name="rollupFn">
+              <% ['SUM','COUNT','AVG','MIN','MAX','LATEST'].forEach(function(fn){ %><option value="<%= fn %>"><%= fn %></option><% }); %>
+            </select>
+          </label>
+          <label>Roll up
+            <select name="rollupHop1Entity">
+              <option value="">&mdash; related table &mdash;</option>
+              <% childOptions.forEach(function(t){ %><option value="<%= t.key %>"><%= t.label %></option><% }); %>
+            </select>
+          </label>
+          <label>...then via (optional 2nd hop)
+            <select name="rollupHop2Entity">
+              <option value="">&mdash; none, stop at 1st table &mdash;</option>
+              <% allEntities.forEach(function(t){ %><option value="<%= t.key %>"><%= t.label %></option><% }); %>
+            </select>
+          </label>
+          <label>Field to aggregate <input type="text" name="rollupField" placeholder="BILLS_Total" style="width:120px"></label>
+          <label>Order by (LATEST only) <input type="text" name="rollupOrderField" placeholder="PAY_Date" style="width:120px"></label>
+          <label style="flex-basis:100%">WHERE (optional) <input type="text" name="rollupWhere" placeholder="FY(BILLS_BillDate) = CURRENT_FY() AND BILLS_Total > parent.LL_CreditLimit" style="width:420px"></label>
+        </div>
+      </div>
+      <div class="field-row"><label class="field-label">Required</label><div class="field-value"><input type="checkbox" name="required"></div></div>
+    </div>
+    <p class="admin-hint" style="display:block;margin:8px 0 0 0;">New fields don't automatically show up as list columns &mdash; add them under <a href="/admin/<%= entity.key %>/views">Views</a> once created.</p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Add Field</button></div>
+  </form>
+</div>
+
+<script>
+  function mlToggleFieldConfig(name, type) {
+    var showMap = { ref: type === 'fk', rows: type === 'textarea', formula: type === 'formula', options: type === 'picklist', series: type === 'series', rollup: type === 'rollup' };
+    Object.keys(showMap).forEach(function(kind) {
+      var el = document.getElementById('cfg-' + kind + '-' + name);
+      if (!el) return;
+      var show = showMap[kind];
+      el.style.display = show ? '' : 'none';
+      el.querySelectorAll('input, select, textarea').forEach(function(inp) { inp.disabled = !show; });
+    });
+  }
+  function mlToggleNewFieldConfig(type) {
+    document.getElementById('newFieldRefRow').style.display = type === 'fk' ? '' : 'none';
+    document.getElementById('newFieldRowsRow').style.display = type === 'textarea' ? '' : 'none';
+    document.getElementById('newFieldFormulaRow').style.display = type === 'formula' ? '' : 'none';
+    document.getElementById('newFieldFormatRow').style.display = (type === 'formula' || type === 'rollup') ? '' : 'none';
+    document.getElementById('newFieldOptionsRow').style.display = type === 'picklist' ? '' : 'none';
+    document.getElementById('newFieldSeriesRow').style.display = type === 'series' ? '' : 'none';
+    document.getElementById('newFieldRollupRow').style.display = type === 'rollup' ? '' : 'none';
+  }
+</script>
+
+<%- include('../partials/foot') %>

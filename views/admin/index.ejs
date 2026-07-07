@@ -1,0 +1,85 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'tables' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Application Administration &mdash; Tables</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/admin/entities/new">+ New Table</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <% var navRows = rows.filter(function(r){ return r.inNav; }); %>
+  <% var offNavRows = rows.filter(function(r){ return !r.inNav; }); %>
+
+  <% function renderRow(row, isNav) { var e = row.entity; %>
+    <tr <%= isNav ? `data-item-id="${e.key}"` : '' %>>
+      <% if (isNav) { %>
+        <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+      <% } else { %>
+        <td>&mdash;</td>
+      <% } %>
+      <td><strong><%= e.label %></strong></td>
+      <td><code><%= e.key %></code></td>
+      <td><code><%= e.pk %></code></td>
+      <td><%= row.count %></td>
+      <td class="nowrap">
+        <% if (isNav) { %>
+          <form method="POST" action="/admin/nav/<%= e.key %>/remove" style="display:inline">
+            <button class="btn btn-mini" type="submit" title="Hide from the main tab bar">Remove from Nav</button>
+          </form>
+        <% } else { %>
+          <form method="POST" action="/admin/nav/<%= e.key %>/add" style="display:inline">
+            <button class="btn btn-mini" type="submit" title="Show as a main screen tab">+ Add to Nav</button>
+          </form>
+        <% } %>
+      </td>
+      <td class="nowrap">
+        <a class="btn btn-mini" href="/admin/<%= e.key %>/fields">Fields</a>
+        <a class="btn btn-mini" href="/admin/<%= e.key %>/views">View</a>
+        <a class="btn btn-mini" href="/admin/<%= e.key %>/settings">Settings</a>
+        <a class="btn btn-mini" href="/<%= e.key %>">View Data</a>
+        <a class="btn btn-mini" href="/admin/<%= e.key %>/export-schema.csv" title="Blank template (header row only)">Export Template</a>
+        <a class="btn btn-mini" href="/admin/<%= e.key %>/export.csv" title="All existing rows">Export Data</a>
+        <a class="btn btn-mini" href="/admin/<%= e.key %>/import">Import CSV</a>
+        <form method="POST" action="/admin/<%= e.key %>/delete" style="display:inline" onsubmit="return confirm('Delete table &quot;<%= e.label %>&quot; and ALL its data? This cannot be undone.');">
+          <button class="btn btn-mini btn-danger" type="submit" <%= row.referenced ? 'disabled title="Other tables link to this one \u2014 repoint or remove those fields first"' : '' %>>Delete</button>
+        </form>
+      </td>
+    </tr>
+  <% } %>
+
+  <p class="admin-help">Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder screen tabs.</p>
+  <div class="list-table-wrap">
+    <table class="list-table reorderable">
+      <thead>
+        <tr><th style="width:32px"></th><th>Screen Label</th><th>Table Key</th><th>Primary Key</th><th>Records</th><th>Nav</th><th>&nbsp;</th></tr>
+      </thead>
+      <tbody data-reorder-url="/admin/nav/reorder">
+        <% if (navRows.length === 0) { %><tr><td colspan="7" class="empty-row">No tables in the nav bar.</td></tr><% } %>
+        <% navRows.forEach(function(row){ renderRow(row, true); }); %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if (offNavRows.length > 0) { %>
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Off-Nav Tables</span></div>
+  <p class="admin-help">Tables not currently on the main tab bar (like Bill Series, meant to be reached from a Landlord's page). They can still be opened via "View Data" or added to the tab bar.</p>
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead>
+        <tr><th style="width:32px"></th><th>Screen Label</th><th>Table Key</th><th>Primary Key</th><th>Records</th><th>Nav</th><th>&nbsp;</th></tr>
+      </thead>
+      <tbody>
+        <% offNavRows.forEach(function(row){ renderRow(row, false); }); %>
+      </tbody>
+    </table>
+  </div>
+  <% } %>
+</div>
+
+<%- include('../partials/foot') %>

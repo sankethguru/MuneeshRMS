@@ -1,0 +1,51 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'users' }) %>
+
+<%
+  var isEdit = !!user;
+  var perms = isEdit ? (user.permissions || {}) : {};
+%>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= isEdit ? 'Edit User \u2014 ' + user.username : 'New User' %></span>
+    <div class="applet-toolbar"><a class="btn btn-toolbar" href="/admin/users">&larr; Back to Users</a></div>
+  </div>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <form class="detail-form" method="POST" action="<%= isEdit ? '/admin/users/' + user.id : '/admin/users' %>">
+    <div class="field-grid">
+      <div class="field-row"><label class="field-label">Username *</label><div class="field-value"><input type="text" name="username" value="<%= isEdit ? user.username : '' %>" required></div></div>
+      <div class="field-row"><label class="field-label"><%= isEdit ? 'New Password' : 'Password *' %></label><div class="field-value"><input type="password" name="password" minlength="4" <%= isEdit ? '' : 'required' %> placeholder="<%= isEdit ? 'leave blank to keep current password' : '' %>"></div></div>
+      <div class="field-row"><label class="field-label">Administrator</label><div class="field-value">
+        <input type="checkbox" id="isAdminChk" name="isAdmin" onchange="document.getElementById('permMatrix').style.opacity = this.checked ? '0.4' : '1'" <%= (isEdit && user.isAdmin) ? 'checked' : '' %>>
+        <span class="admin-hint">full access to every table and the Admin section; overrides the checkboxes below</span>
+      </div></div>
+    </div>
+
+    <div class="applet-titlebar applet-titlebar-child" style="margin-top:16px;"><span class="applet-title">Table Permissions</span></div>
+    <div id="permMatrix" style="<%= (isEdit && user.isAdmin) ? 'opacity:0.4' : '' %>">
+      <div class="list-table-wrap">
+        <table class="list-table">
+          <thead><tr><th>Table</th><th class="center">Create</th><th class="center">Read</th><th class="center">Update</th><th class="center">Delete</th></tr></thead>
+          <tbody>
+            <% Object.values(schema.entities).forEach(function(e, i){ var p = perms[e.key] || {}; %>
+            <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+              <td><strong><%= e.label %></strong></td>
+              <td class="center"><input type="checkbox" name="perm_<%= e.key %>_create" <%= p.create ? 'checked' : '' %>></td>
+              <td class="center"><input type="checkbox" name="perm_<%= e.key %>_read" <%= p.read ? 'checked' : '' %>></td>
+              <td class="center"><input type="checkbox" name="perm_<%= e.key %>_update" <%= p.update ? 'checked' : '' %>></td>
+              <td class="center"><input type="checkbox" name="perm_<%= e.key %>_delete" <%= p.delete ? 'checked' : '' %>></td>
+            </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="form-actions"><button class="btn btn-primary" type="submit"><%= isEdit ? 'Save User' : 'Create User' %></button></div>
+  </form>
+</div>
+
+<%- include('../partials/foot') %>
