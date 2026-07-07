@@ -1,6 +1,6 @@
 # Muneesh Legacy
 
-Rental & property management app, styled after a classic Siebel enterprise
+Rental & property management app, styled after a classic  enterprise
 UI (masthead, screen tabs, thread bar, list/detail applets, beveled
 toolbars). Fonts: **Cormorant Garamond** (headings/titles) + **DM Sans**
 (body/UI).
@@ -124,7 +124,7 @@ sub-tabs: **Tables**, **Views**, **Users**, **Audit Log**, **Backup**,
     both have a "bill #1".
   - **textarea** — adjustable **height (rows)**, set per field in Config.
 - **Views** — a dedicated admin sub-tab, separate from Fields, matching
-  Siebel's split between a table's underlying fields (Business Component)
+  's split between a table's underlying fields (Business Component)
   and how a screen displays them (Applet/View). For each table, choose
   exactly which fields appear as List columns, their display order
   (independent of the field order used on the Detail form), and a default
@@ -271,7 +271,7 @@ routes/admin.js          Admin screen routes (tables, fields, users, audit, back
 db.js                    Tiny JSON-file datastore for records (data/db.json), with a request-scoped read cache
 seed.js                  Sample starter data
 views/                   EJS templates (list.ejs, form.ejs, partials/, admin/, login.ejs, landing.ejs, account.ejs, 403.ejs)
-public/css/style.css      Siebel-classic theme
+public/css/style.css      S-classic theme
 public/js/app.js          Client-side helpers (currency live-preview, drag-and-drop reorder, filter panel toggle, etc.)
 ```
 
