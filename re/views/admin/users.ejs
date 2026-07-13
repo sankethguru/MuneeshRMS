@@ -1,0 +1,38 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'users' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Users</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/admin/users/new">+ New User</a>
+      <a class="btn btn-toolbar" href="/admin">&larr; Back to Admin</a>
+    </div>
+  </div>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Username</th><th>Role</th><th>Created</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% users.forEach(function(u, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><strong><%= u.username %></strong><%= String(u.id) === String(currentUserId) ? ' (you)' : '' %></td>
+          <td><%= u.isAdmin ? 'Administrator (full access)' : 'Standard user' %></td>
+          <td><%= (u.createdAt || '').slice(0,10) %></td>
+          <td class="nowrap">
+            <a class="btn btn-mini" href="/admin/users/<%= u.id %>/edit">Edit</a>
+            <form method="POST" action="/admin/users/<%= u.id %>/delete" style="display:inline" onsubmit="return confirm('Delete user &quot;<%= u.username %>&quot;?');">
+              <button class="btn btn-mini btn-danger" type="submit" <%= String(u.id) === String(currentUserId) ? 'disabled' : '' %>>Delete</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+  <p class="admin-help">Administrators have full access to every table and to this Admin section. Standard users only get the Create/Read/Update/Delete permissions you grant them per table.</p>
+</div>
+
+<%- include('../partials/foot') %>

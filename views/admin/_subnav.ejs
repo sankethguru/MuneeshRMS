@@ -1,12 +1,10 @@
-<div class="admin-subtabs">
-  <a class="admin-subtab <%= sub === 'tables' ? 'active' : '' %>" href="/admin">Tables</a>
-  <a class="admin-subtab <%= sub === 'views' ? 'active' : '' %>" href="/admin/views">Views</a>
-  <a class="admin-subtab <%= sub === 'users' ? 'active' : '' %>" href="/admin/users">Users</a>
-  <a class="admin-subtab <%= sub === 'audit' ? 'active' : '' %>" href="/admin/audit">Audit Log</a>
-  <a class="admin-subtab <%= sub === 'backup' ? 'active' : '' %>" href="/admin/backup">Backup</a>
-  <a class="admin-subtab <%= sub === 'errors' ? 'active' : '' %>" href="/admin/errors">Errors</a>
-  <a class="admin-subtab <%= sub === 'payqr' ? 'active' : '' %>" href="/admin/payqr-settings">PayQR Settings</a>
-  <a class="admin-subtab <%= sub === 'session' ? 'active' : '' %>" href="/admin/session-settings">Session</a>
-  <a class="admin-subtab <%= sub === 'reports' ? 'active' : '' %>" href="/admin/reports">Reports</a>
-  <a class="admin-subtab <%= sub === 'help' ? 'active' : '' %>" href="/admin/help">Help</a>
+<div class="admin-subtabs reorderable-list" data-reorder-url="/admin/subnav/reorder">
+  <% (adminSubnavOrder || []).forEach(function(key) { %>
+    <% var fixedPage = adminSubnavFixedPages[key]; %>
+    <% if (fixedPage) { %>
+      <a class="admin-subtab <%= sub === key ? 'active' : '' %>" data-item-id="<%= key %>" href="<%= fixedPage.href %>"><%= fixedPage.label %></a>
+    <% } else if (entities[key]) { %>
+      <a class="admin-subtab <%= sub === ('table:' + key) ? 'active' : '' %>" data-item-id="<%= key %>" href="/<%= key %>"><%= entities[key].label %></a>
+    <% } %>
+  <% }); %>
 </div>

@@ -396,6 +396,51 @@ a:hover { text-decoration: underline; }
   line-height: 1.4;
 }
 
+/* ---------- Report Header Panel ---------- */
+.header-panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 24px;
+  padding: 16px 20px;
+}
+.header-panel-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.header-panel-field label {
+  display: block;
+  margin-bottom: 3px;
+}
+.header-panel-field input[readonly],
+.header-panel-field textarea[readonly] {
+  width: 100%;
+  background: #fafaf6;
+  border: 1px solid var(--border-dark);
+  padding: 6px 8px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12.5px;
+  color: var(--ink);
+  resize: vertical;
+  box-sizing: border-box;
+}
+@media (max-width: 700px) {
+  .header-panel-grid { grid-template-columns: 1fr; }
+}
+.row-total td {
+  border-top: 2px solid var(--navy-2);
+  background: #f4f2ea;
+}
+
+/* Selected row in a master-detail Screen applet (the currently-picked
+   parent record driving a child applet's filter) — deliberately its own
+   class, not a reuse of .row-total, which has a border-top meant to set
+   a totals row apart from data above it and looked like a stray line
+   when repurposed for selection. Plain light-gold fill only. */
+.row-selected td {
+  background: var(--gold-soft, #f7ecd5);
+}
+
 /* ---------- List table ---------- */
 .list-table-wrap { overflow-x: auto; }
 .list-table {
@@ -599,6 +644,18 @@ a:hover { text-decoration: underline; }
   font-style: italic;
 }
 .admin-hint { font-size: 11px; color: #7a7562; font-style: italic; margin-left: 4px; }
+
+/* ---------- Field-level hint (Admin -> Fields "Hint" text) ---------- */
+.field-hint {
+  font-size: 11.5px;
+  color: #7a7562;
+  margin: 4px 0 0 0;
+  line-height: 1.4;
+}
+.field-hint-important {
+  color: #a13c3c;
+  font-weight: 600;
+}
 
 .list-table td.nowrap, .list-table th.nowrap { white-space: nowrap; }
 .list-table td.center { text-align: center; }

@@ -1,0 +1,27 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'tables' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">New Table</span>
+    <div class="applet-toolbar"><a class="btn btn-toolbar" href="/admin">&larr; Back to Admin</a></div>
+  </div>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <form class="detail-form" method="POST" action="/admin/entities">
+    <div class="field-grid">
+      <div class="field-row"><label class="field-label">Screen Label *</label><div class="field-value"><input type="text" name="label" placeholder="e.g. Vendors" required></div></div>
+      <div class="field-row"><label class="field-label">Singular Label</label><div class="field-value"><input type="text" name="singular" placeholder="e.g. Vendor"></div></div>
+      <div class="field-row"><label class="field-label">Table Key</label><div class="field-value"><input type="text" name="key" placeholder="auto-generated from label if left blank"></div></div>
+      <div class="field-row"><label class="field-label">Primary Key Field Name *</label><div class="field-value"><input type="text" name="pkName" placeholder="e.g. VEN_Code" required></div></div>
+      <div class="field-row"><label class="field-label">Primary Key Label</label><div class="field-value"><input type="text" name="pkLabel" placeholder="e.g. Vendor Code"></div></div>
+      <div class="field-row"><label class="field-label">Auto-Number Key?</label><div class="field-value">
+        <input type="checkbox" name="pkAuto"> <span class="admin-hint">numeric ID, auto-assigned on create (like Bills)</span>
+      </div></div>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Create Table</button></div>
+  </form>
+  <p class="admin-help">After creating the table you'll land on its Fields screen to add the rest of the columns &mdash; including lookup ("fk") fields that link to other tables.</p>
+</div>
+
+<%- include('../partials/foot') %>

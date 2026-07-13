@@ -1,0 +1,29 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Reports</span>
+  </div>
+
+  <% if (reportDefs.length > 0) { %>
+    <p class="admin-help">Data is re-fetched live every time you open a report &mdash; there's no cached or stale snapshot here, just the current state of the underlying tables at the moment you click.</p>
+  <% } %>
+
+  <% if (reportDefs.length === 0) { %>
+    <div class="empty-row" style="padding:24px;text-align:center;">
+      No reports available yet. An administrator can build one under Admin &rarr; Reports.
+    </div>
+  <% } else { %>
+    <div class="report-card-grid">
+      <% reportDefs.forEach(function(def){ %>
+        <a class="report-card" href="/reports/<%= def.key %>">
+          <span class="report-card-title"><%= def.label %></span>
+          <% if (def.description) { %><span class="report-card-desc"><%= def.description %></span><% } %>
+        </a>
+      <% }); %>
+    </div>
+  <% } %>
+</div>
+
+<%- include('../partials/foot') %>

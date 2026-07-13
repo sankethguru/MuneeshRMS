@@ -1,0 +1,132 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= listTitle %></span>
+    <div class="applet-toolbar">
+      <% if (canCreate) { %><a class="btn btn-toolbar" href="/<%= entity.key %>/new/form">+ New Record</a><% } %>
+      <a class="btn btn-toolbar" href="/admin/<%= entity.key %>/fields">Edit Fields</a>
+      <button class="btn btn-toolbar" type="button" onclick="location.reload()">&#8635; Refresh</button>
+    </div>
+  </div>
+
+  <form class="query-bar" method="GET" action="/<%= entity.key %>">
+    <label for="q">Query:</label>
+    <input type="text" id="q" name="q" value="<%= q %>" placeholder="Type to filter across visible columns and press Enter&hellip;" autocomplete="off">
+    <% if (filterFields.length > 0) { %>
+      <button class="btn btn-query" type="button" onclick="mlToggleFilterPanel()">Filter<%= filtersActive ? ' \u25CF' : '' %></button>
+    <% } %>
+    <button class="btn btn-query" type="submit">Go</button>
+    <% if (q || filtersActive) { %><a class="btn btn-query" href="/<%= entity.key %>">Clear</a><% } %>
+    <span class="query-count"><%= rows.length %> record<%= rows.length === 1 ? '' : 's' %></span>
+
+    <% if (filterFields.length > 0) { %>
+    <div id="filterPanel" class="filter-panel" style="<%= filtersActive ? '' : 'display:none' %>">
+      <% filterFields.forEach(function(f){ %>
+        <% var kind = filterKindFor(f); %>
+        <div class="filter-control">
+          <label><%= f.label %><%= (f.type === 'percent' || f.format === 'percent') ? ' (%)' : '' %></label>
+          <% if (kind === 'exact' && f.type === 'bool') { %>
+            <select name="f_<%= f.name %>">
+              <option value="">All</option>
+              <option value="true" <%= filterValues[f.name]==='true' ? 'selected' : '' %>>Yes</option>
+              <option value="false" <%= filterValues[f.name]==='false' ? 'selected' : '' %>>No</option>
+            </select>
+          <% } else if (kind === 'exact' && f.type === 'picklist') { %>
+            <select name="f_<%= f.name %>">
+              <option value="">All</option>
+              <% picklistOptions(f).forEach(function(opt){ %>
+                <option value="<%= opt %>" <%= filterValues[f.name]===opt ? 'selected' : '' %>><%= opt %></option>
+              <% }); %>
+            </select>
+          <% } else if (kind === 'exact' && f.type === 'fk') { %>
+            <select name="f_<%= f.name %>">
+              <option value="">All</option>
+              <% (fkFilterOptions[f.name] || []).forEach(function(opt){ %>
+                <option value="<%= opt.value %>" <%= filterValues[f.name]===String(opt.value) ? 'selected' : '' %>><%= opt.label %></option>
+              <% }); %>
+            </select>
+          <% } else if (kind === 'exact') { %>
+            <input type="text" name="f_<%= f.name %>" value="<%= filterValues[f.name] %>" placeholder="Exact match&hellip;">
+          <% } else if (kind === 'date-range') { %>
+            <span class="filter-date-range">
+              <input type="date" name="f_<%= f.name %>_from" value="<%= filterValues[f.name].from %>" title="From">
+              &ndash;
+              <input type="date" name="f_<%= f.name %>_to" value="<%= filterValues[f.name].to %>" title="To">
+            </span>
+          <% } else if (kind === 'number-range') { %>
+            <span class="filter-date-range">
+              <input type="number" step="any" name="f_<%= f.name %>_from" value="<%= filterValues[f.name].from %>" title="Min" placeholder="Min" style="width:72px">
+              &ndash;
+              <input type="number" step="any" name="f_<%= f.name %>_to" value="<%= filterValues[f.name].to %>" title="Max" placeholder="Max" style="width:72px">
+            </span>
+          <% } %>
+        </div>
+      <% }); %>
+      <button class="btn btn-primary btn-mini" type="submit">Apply Filters</button>
+    </div>
+    <% } %>
+  </form>
+
+  <div class="list-table-wrap">
+    <% var EXPAND_THRESHOLD = 12; %>
+    <table class="list-table" id="mainListTable">
+      <thead>
+        <tr>
+          <% listFields.forEach(function(f){ %>
+            <th><%= f.label %></th>
+          <% }); %>
+          <th class="col-actions">&nbsp;</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (rows.length === 0) { %>
+          <tr><td colspan="<%= listFields.length + 1 %>" class="empty-row">No records found. Query specified no matching rows.</td></tr>
+        <% } %>
+        <% rows.forEach(function(r, i){ %>
+          <tr class="data-row <%= i % 2 === 0 ? 'row-even' : 'row-odd' %> <%= i >= EXPAND_THRESHOLD ? 'row-collapsed' : '' %>" style="<%= i >= EXPAND_THRESHOLD ? 'display:none' : '' %>" onclick="location.href='/<%= entity.key %>/<%= encodeURIComponent(r[entity.pk]) %>'">
+            <% listFields.forEach(function(f, ci){ %>
+              <td>
+                <% var val = r[f.name]; %>
+                <% if (typeof val === 'boolean') { %>
+                  <span class="bool-flag <%= val ? 'bool-yes' : 'bool-no' %>"><%= val ? 'Y' : 'N' %></span>
+                <% } else if (f.type === 'currency') { %>
+                  <span class="currency-val"><%= formatINR(val) %></span>
+                <% } else if (f.type === 'percent') { %>
+                  <span class="currency-val"><%= formatPercent(val) %></span>
+                <% } else if (f.type === 'image') { %>
+                  <% if (val) { %><img class="image-thumb-mini" src="/uploads/<%= entity.key %>/<%= f.name %>/<%= val %>" alt=""><% } %>
+                <% } else if (f.type === 'date') { %>
+                  <%= formatDate(val, false) %>
+                <% } else if (f.type === 'timestamp') { %>
+                  <%= formatDate(val, true) %>
+                <% } else if (f.type === 'formula' || f.type === 'rollup') { %>
+                  <%= formatFormulaValue(f, val) %>
+                <% } else if (ci === 0) { %>
+                  <a class="cell-link" href="/<%= entity.key %>/<%= encodeURIComponent(r[entity.pk]) %>"><%= val %></a>
+                <% } else { %>
+                  <%= val %>
+                <% } %>
+              </td>
+            <% }); %>
+            <td class="col-actions" onclick="event.stopPropagation()">
+              <% if (canDelete) { %>
+              <form method="POST" action="/<%= entity.key %>/<%= encodeURIComponent(r[entity.pk]) %>/delete" onsubmit="return confirm('Delete this record permanently?');">
+                <button class="btn btn-mini btn-danger" type="submit">Delete</button>
+              </form>
+              <% } %>
+            </td>
+          </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <% if (rows.length > EXPAND_THRESHOLD) { %>
+      <div class="expand-row-wrap">
+        <button class="btn btn-mini expand-toggle" type="button" data-target="mainListTable" data-more-label="Show all <%= rows.length %> records (<%= rows.length - EXPAND_THRESHOLD %> more)" data-less-label="Show fewer" onclick="mlToggleExpand(this)">Show all <%= rows.length %> records (<%= rows.length - EXPAND_THRESHOLD %> more)</button>
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<%- include('partials/foot') %>

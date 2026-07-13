@@ -1,0 +1,73 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= screen.label %></span>
+  </div>
+
+  <% if (viewList.length > 1) { %>
+    <div class="admin-subtabs">
+      <% viewList.forEach(function(v){ %>
+        <a class="admin-subtab <%= v.key === activeViewKey ? 'active' : '' %>" href="/screens/<%= screen.key %>?view=<%= encodeURIComponent(v.key) %>"><%= v.label %></a>
+      <% }); %>
+    </div>
+  <% } %>
+
+  <% if (appletBlocks.length === 0) { %>
+    <p class="admin-help" style="padding:16px 20px;">This screen has no views configured yet.</p>
+  <% } %>
+
+  <% appletBlocks.forEach(function(block){ %>
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title"><%= block.applet ? block.applet.label : 'Unknown Applet' %></span></div>
+
+    <% if (block.error) { %>
+      <p class="admin-help" style="padding:8px 20px;color:#a13c3c;"><%= block.error %></p>
+    <% } else if (block.notSupported) { %>
+      <p class="admin-help" style="padding:8px 20px;">Detail-type applets aren't rendered in this build yet &mdash; only List applets are.</p>
+    <% } else if (block.needsParentSelection) { %>
+      <p class="admin-help" style="padding:8px 20px;">Select a record above to see its related rows here.</p>
+    <% } else { %>
+      <div class="list-table-wrap">
+        <table class="list-table">
+          <thead>
+            <tr><% block.columns.forEach(function(f){ %><th><%= f.label %></th><% }); %></tr>
+          </thead>
+          <tbody>
+            <% if (block.rows.length === 0) { %>
+              <tr><td colspan="<%= block.columns.length %>" class="empty-row">No matching records.</td></tr>
+            <% } %>
+            <% block.rows.forEach(function(r, i){ %>
+              <% var pkVal = r[block.entity.pk]; %>
+              <% var isSelected = block.selectedValue !== null && String(pkVal) === String(block.selectedValue); %>
+              <tr class="data-row <%= i % 2 === 0 ? 'row-even' : 'row-odd' %> <%= isSelected ? 'row-selected' : '' %>" style="cursor:pointer;" onclick="location.href='<%= block.selectUrl(pkVal) %>'">
+                <% block.columns.forEach(function(f){ %>
+                  <td>
+                    <% var val = r[f.name]; %>
+                    <% if (typeof val === 'boolean') { %>
+                      <span class="bool-flag <%= val ? 'bool-yes' : 'bool-no' %>"><%= val ? 'Y' : 'N' %></span>
+                    <% } else if (f.type === 'currency') { %>
+                      <span class="currency-val"><%= formatINR(val) %></span>
+                    <% } else if (f.type === 'percent') { %>
+                      <span class="currency-val"><%= formatPercent(val) %></span>
+                    <% } else if (f.type === 'date') { %>
+                      <%= formatDate(val, false) %>
+                    <% } else if (f.type === 'timestamp') { %>
+                      <%= formatDate(val, true) %>
+                    <% } else if (f.type === 'formula' || f.type === 'rollup') { %>
+                      <%= formatFormulaValue(f, val) %>
+                    <% } else { %>
+                      <%= val %>
+                    <% } %>
+                  </td>
+                <% }); %>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  <% }); %>
+</div>
+
+<%- include('partials/foot') %>

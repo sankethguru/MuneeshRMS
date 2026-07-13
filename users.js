@@ -4,6 +4,7 @@
 // first run (username: admin / password: admin123 — change it!).
 
 const fs = require('fs');
+const { atomicWriteFileSync } = require('./fsutil');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 
@@ -22,7 +23,7 @@ function ensure() {
       mustChangePassword: true,
       createdAt: new Date().toISOString(),
     };
-    fs.writeFileSync(USERS_FILE, JSON.stringify({ users: [admin], nextId: 2 }, null, 2));
+    atomicWriteFileSync(USERS_FILE, JSON.stringify({ users: [admin], nextId: 2 }, null, 2));
   }
 }
 
@@ -32,7 +33,7 @@ function load() {
 }
 
 function persist(data) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2));
+  atomicWriteFileSync(USERS_FILE, JSON.stringify(data, null, 2));
 }
 
 function getAll() {
@@ -59,7 +60,7 @@ function countAdmins(data) {
 
 function createUser({ username, password, isAdmin, permissions }) {
   if (!username || !username.trim()) throw new Error('Username is required.');
-  if (!password || password.length < 4) throw new Error('Password must be at least 4 characters.');
+  if (!password || password.length < 8) throw new Error('Password must be at least 8 characters.');
   const data = load();
   if (data.users.some(u => u.username.toLowerCase() === username.trim().toLowerCase())) {
     throw new Error(`A user named "${username.trim()}" already exists.`);
@@ -70,7 +71,12 @@ function createUser({ username, password, isAdmin, permissions }) {
     passwordHash: bcrypt.hashSync(password, 10),
     isAdmin: !!isAdmin,
     permissions: permissions || {},
-    mustChangePassword: false,
+    // An admin-assigned password is a known value someone other than
+    // the account's actual owner chose — the same shape of risk as the
+    // seed admin's known default password, so it gets the same
+    // treatment: forced to change on first login, not left as a
+    // silent exception to the rule.
+    mustChangePassword: true,
     createdAt: new Date().toISOString(),
   };
   data.users.push(user);
@@ -89,7 +95,7 @@ function updateUser(id, { username, password, isAdmin, permissions }) {
     user.username = username.trim();
   }
   if (password) {
-    if (password.length < 4) throw new Error('Password must be at least 4 characters.');
+    if (password.length < 8) throw new Error('Password must be at least 8 characters.');
     user.passwordHash = bcrypt.hashSync(password, 10);
     user.mustChangePassword = false;
   }

@@ -5,7 +5,18 @@
 
 function stringifyRow(cells) {
   return cells.map(c => {
-    const s = c === undefined || c === null ? '' : String(c);
+    let s = c === undefined || c === null ? '' : String(c);
+    // A cell starting with =, +, -, or @ executes as a formula when the
+    // exported CSV is opened in Excel — prefixing it with a single quote
+    // forces it to be treated as literal text instead. Checked on the
+    // raw value before the existing quote-escaping below, since a
+    // leading "'" doesn't itself introduce anything that needs quoting.
+    // Deliberately skipped for a value that's actually just a clean
+    // number (Number(s) parses cleanly) — a legitimate negative amount
+    // like "-500" also starts with "-", and forcing it to display as
+    // text in Excel would be a real usability regression for something
+    // that was never a formula-injection risk in the first place.
+    if (/^[=+\-@]/.test(s) && isNaN(Number(s))) s = "'" + s;
     if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
     return s;
   }).join(',');

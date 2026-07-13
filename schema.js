@@ -5,6 +5,7 @@
 // data, not code.
 
 const fs = require('fs');
+const { atomicWriteFileSync } = require('./fsutil');
 const path = require('path');
 const defaultSchema = require('./default-schema');
 const db = require('./db');
@@ -15,17 +16,55 @@ const SCHEMA_FILE = path.join(DATA_DIR, 'schema.json');
 const FIELD_TYPES = ['text', 'number', 'date', 'timestamp', 'bool', 'textarea', 'fk', 'currency', 'percent', 'image', 'formula', 'picklist', 'series', 'rollup', 'spacer', 'section'];
 // Layout-only types: hold no data, never saved, never in list columns, never importable/exportable.
 const LAYOUT_TYPES = ['spacer', 'section'];
+
+// Admin's own built-in pages (as opposed to a table that's been moved in)
+// — key, label, and route, in what was the old hardcoded subnav order.
+// Used both to seed schema.adminSubnavOrder on first load and to render
+// the subnav itself, since a moved-in table needs to be interleaved with
+// these by position, not just appended after them.
+const ADMIN_SUBNAV_FIXED_PAGES = {
+  tables: { label: 'Tables', href: '/admin' },
+  views: { label: 'Views', href: '/admin/views' },
+  users: { label: 'Users', href: '/admin/users' },
+  audit: { label: 'Audit Log', href: '/admin/audit' },
+  backup: { label: 'Backup', href: '/admin/backup' },
+  errors: { label: 'Errors', href: '/admin/errors' },
+  payqr: { label: 'PayQR Settings', href: '/admin/payqr-settings' },
+  session: { label: 'Session', href: '/admin/session-settings' },
+  reports: { label: 'Reports', href: '/admin/reports' },
+  applets: { label: 'Applets', href: '/admin/applets' },
+  composedViews: { label: 'Views (Applet-based)', href: '/admin/composed-views' },
+  screens: { label: 'Screens', href: '/admin/screens' },
+  picklists: { label: 'Picklists', href: '/admin/picklists' },
+  help: { label: 'Help', href: '/admin/help' },
+  journey: { label: 'Getting Started', href: '/admin/journey' },
+};
+const ADMIN_SUBNAV_FIXED_KEYS = Object.keys(ADMIN_SUBNAV_FIXED_PAGES);
 // Computed types: value is derived, never taken from a form or CSV import.
 const COMPUTED_TYPES = ['formula', 'rollup', 'series'];
 
 function ensure() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(SCHEMA_FILE)) fs.writeFileSync(SCHEMA_FILE, JSON.stringify(defaultSchema, null, 2));
+  if (!fs.existsSync(SCHEMA_FILE)) atomicWriteFileSync(SCHEMA_FILE, JSON.stringify(defaultSchema, null, 2));
 }
 
 function load() {
   ensure();
   const schema = JSON.parse(fs.readFileSync(SCHEMA_FILE, 'utf8'));
+  return normalizeSchema(schema);
+}
+
+// Extracted from load() so an uploaded/in-memory schema (e.g. during a
+// Backup Restore) can be run through the exact same migration and shape
+// validation as a normal disk-based boot — catching a structurally
+// broken schema (missing "entities", wrong types, etc.) before it's
+// ever committed to disk, rather than a shallow "is this valid JSON"
+// check that lets a malformed-but-parseable file through, only to crash
+// every subsequent request (including the Backup page needed to fix it).
+function normalizeSchema(schema) {
+  if (!schema || typeof schema !== 'object' || !schema.entities || typeof schema.entities !== 'object' || Array.isArray(schema.entities)) {
+    throw new Error('This schema is missing a valid "entities" object \u2014 it doesn\'t look like a real Muneesh Legacy schema.json.');
+  }
   // Migrate older schema.json files: list-view config used to be implicit
   // (whichever fields had inList:true, in field/form order). It's now an
   // explicit, independently-orderable list per entity (see "Views" in Admin).
@@ -92,11 +131,56 @@ function load() {
   // .js file. See runReport() below for how these get executed.
   if (!Array.isArray(schema.reportDefs)) schema.reportDefs = [];
 
+  // Applet / View / Screen — a Siebel-mapped layer on top of the existing
+  // table-centric screens. An Applet is a reusable, independent list/detail
+  // definition bound to one table; a View is an ordered collection of
+  // Applet *instances*, where a child instance can declare a parent
+  // instance (in the same View) plus a linkField, so its rows re-filter
+  // based on whatever's currently selected in the parent; a Screen is an
+  // ordered collection of Views. None of this replaces the existing
+  // per-table List/Detail screens — old and new can coexist table by table.
+  if (!Array.isArray(schema.applets)) schema.applets = [];
+  if (!Array.isArray(schema.views)) schema.views = [];
+  if (!Array.isArray(schema.screens)) schema.screens = [];
+
+  // Global Picklists (Admin -> Picklists) — a centrally-defined, reusable
+  // value list, mapped on Siebel's "List of Values" concept. A picklist-
+  // type field can point at one of these (picklistSource: 'global') as
+  // an alternative to typing its own one-off comma-separated options.
+  // Two source shapes: 'static' (admin-typed values, each with an
+  // active flag so a retired option can be deactivated without breaking
+  // historical records that already used it) and 'table' (options
+  // pulled live from an actual table's field — e.g. every card name in
+  // the Banking table — optionally further constrained by another field
+  // on the record being edited, matching what's shown to what's actually
+  // relevant, e.g. only THIS record's own account type's cards).
+  if (!Array.isArray(schema.picklists)) schema.picklists = [];
+
+  // Admin's own subnav (Tables/Views/Users/.../Help) is now a dynamic,
+  // orderable list rather than a fixed sequence — this is what makes
+  // "move a screen into Admin" meaningful, since a moved-in table needs
+  // a place in that same order. Auto-populated with today's fixed order
+  // on first load so existing installs see zero change until something
+  // actually gets moved in or reordered.
+  if (!Array.isArray(schema.adminSubnavOrder)) {
+    schema.adminSubnavOrder = [...ADMIN_SUBNAV_FIXED_KEYS];
+  } else {
+    // Migrating an existing install whose adminSubnavOrder was saved
+    // before some newer fixed page (Journey, Applets, ...) existed —
+    // append any missing ones at the end rather than losing them.
+    ADMIN_SUBNAV_FIXED_KEYS.forEach(k => {
+      if (!schema.adminSubnavOrder.includes(k)) schema.adminSubnavOrder.push(k);
+    });
+  }
+  Object.values(schema.entities).forEach(e => {
+    if (typeof e.inAdmin !== 'boolean') e.inAdmin = false;
+  });
+
   return schema;
 }
 
 function persist(schema) {
-  fs.writeFileSync(SCHEMA_FILE, JSON.stringify(schema, null, 2));
+  atomicWriteFileSync(SCHEMA_FILE, JSON.stringify(schema, null, 2));
 }
 
 function slugify(s) {
@@ -281,6 +365,24 @@ const STATIC_FORMULA_FUNCTIONS = {
   CURRENT_FY: () => fyLabelOf(new Date()),
 };
 
+// Shared "scan this table for rows where a condition holds" logic — used
+// by both LOOKUP() and (below) Header Panel anchor resolution. The
+// condition is evaluated once per row via the normal formula engine, with
+// `extraScopes` supplying whatever named context the condition needs
+// beyond the target table's own fields (which get bound under
+// `targetEntity.key` here, same as LOOKUP's own `tableKey.field` syntax).
+function findMatchingRows(schema, targetEntity, conditionExpr, callerEntity, callerRecord, extraScopes, depth) {
+  let conditionError = null;
+  const matches = db.getAll(targetEntity.key).filter(row => {
+    if (conditionError) return false;
+    const scopes = { ...extraScopes, [targetEntity.key]: { entity: targetEntity, row } };
+    const result = evalFormula(conditionExpr, schema, callerEntity, callerRecord, scopes, depth + 1);
+    if (isFormulaError(result)) { conditionError = result; return false; }
+    return result === true;
+  });
+  return { matches, conditionError };
+}
+
 // LOOKUP("tableKey", "condition expression", "returnFieldName")
 // Scans every row of the named table, evaluating the condition against each
 // row (that row's own fields are reachable as "tableKey.Field" inside the
@@ -293,14 +395,7 @@ function makeLookupFn(schema, entity, record, extraScopes, depth) {
     if (depth >= MAX_LOOKUP_DEPTH) return '#LOOKUP: too deeply nested';
     const targetEntity = schema.entities[tableKey];
     if (!targetEntity) return `#LOOKUP: unknown table "${tableKey}"`;
-    let conditionError = null;
-    const matches = db.getAll(targetEntity.key).filter(row => {
-      if (conditionError) return false;
-      const scopes = { ...extraScopes, [tableKey]: { entity: targetEntity, row } };
-      const result = evalFormula(conditionExpr, schema, entity, record, scopes, depth + 1);
-      if (isFormulaError(result)) { conditionError = result; return false; }
-      return result === true;
-    });
+    const { matches, conditionError } = findMatchingRows(schema, targetEntity, conditionExpr, entity, record, extraScopes, depth);
     if (conditionError) return conditionError;
     if (matches.length === 0) return '#LOOKUP: no match';
     if (matches.length > 1) return `#LOOKUP: ambiguous (${matches.length} rows)`;
@@ -312,9 +407,39 @@ function makeLookupFn(schema, entity, record, extraScopes, depth) {
 // extraScopes: optional { scopeName: rowObject } map for dotted references
 // that aren't reached via a real fk on `entity` — e.g. "parent.X" inside a
 // rollup's WHERE clause, or "tableKey.X" inside a LOOKUP condition.
-function evalFormula(formula, schema, entity, record, extraScopes, depth) {
+// Formula/rollup fields can reference sibling formula/rollup fields on the
+// same table (e.g. I_TotalBill = I_BaseRent + I_CGSTAmt, where I_BaseRent
+// and I_CGSTAmt are themselves formula fields) — resolved on demand,
+// recursively, right here, rather than requiring some separate
+// pre-computation pass. `visiting` is a Set of "entityKey.fieldName"
+// strings currently being resolved further up the call stack; if we're
+// asked to resolve something already in there, that's a genuine circular
+// reference (A depends on B depends on A) and we say so explicitly rather
+// than looping forever or silently returning something wrong.
+const MAX_FORMULA_REF_DEPTH = 15;
+function resolveComputedField(schema, entity, record, field, visiting, depth) {
+  const cycleKey = entity.key + '.' + field.name;
+  if (visiting.has(cycleKey)) return `#REF: circular reference involving "${field.name}"`;
+  if (depth > MAX_FORMULA_REF_DEPTH) return '#REF: formula reference too deep';
+  const nextVisiting = new Set(visiting);
+  nextVisiting.add(cycleKey);
+  let result;
+  if (field.type === 'formula') {
+    result = evalFormula(field.formula, schema, entity, record, {}, depth + 1, nextVisiting);
+  } else if (field.type === 'rollup') {
+    result = computeRollup(schema, field, entity, record, nextVisiting, depth + 1);
+  } else {
+    return record[field.name];
+  }
+  const isBlank = result === undefined || result === null || result === '';
+  if (isBlank) return isArithmeticFieldType(field.type) ? 0 : '';
+  return result;
+}
+
+function evalFormula(formula, schema, entity, record, extraScopes, depth, visiting) {
   extraScopes = extraScopes || {};
   depth = depth || 0;
+  visiting = visiting || new Set();
   if (!formula || !formula.trim()) return '';
   const trimmed = formula.trim();
   if (!FORMULA_SAFE_RE.test(trimmed) || FORMULA_BANNED_RE.test(trimmed)) return '#ERR';
@@ -337,9 +462,15 @@ function evalFormula(formula, schema, entity, record, extraScopes, depth) {
     return resolved.value === undefined ? '' : resolved.value;
   }
   const bareField = trimmed.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/);
-  if (bareField && entity.fields.some(f => f.name === trimmed)) {
-    const v = record[trimmed];
-    return v === undefined ? '' : v;
+  if (bareField) {
+    const f = entity.fields.find(f => f.name === trimmed);
+    if (f && (f.type === 'formula' || f.type === 'rollup')) {
+      return resolveComputedField(schema, entity, record, f, visiting, depth);
+    }
+    if (f) {
+      const v = record[trimmed];
+      return v === undefined ? '' : v;
+    }
   }
 
   const { masked, literals } = maskQuotedStrings(trimmed);
@@ -373,13 +504,29 @@ function evalFormula(formula, schema, entity, record, extraScopes, depth) {
   if (refError) return refError;
   const workingFormula = unmaskQuotedStrings(maskedWorking, literals);
 
-  const varFields = entity.fields.filter(f => f.type !== 'formula' && f.type !== 'rollup');
+  // Every STORED field is a valid bare-name reference, same as always.
+  // Formula/rollup fields are ALSO now valid bare-name references (this is
+  // the sibling-formula fix) — but only pulled in when actually mentioned
+  // in this formula's own text. Unconditionally resolving every formula/
+  // rollup field on the table for every single evaluation would mean each
+  // one recomputes every other one too, compounding multiplicatively on a
+  // table with many formula fields — a real, measured problem, not a
+  // theoretical one.
+  const storedFields = entity.fields.filter(f => f.type !== 'formula' && f.type !== 'rollup');
+  const referencedComputedFields = entity.fields.filter(f => {
+    if (f.type !== 'formula' && f.type !== 'rollup') return false;
+    return new RegExp('\\b' + f.name + '\\b').test(workingFormula);
+  });
+  const varFields = storedFields.concat(referencedComputedFields);
   const fnNames = Object.keys(STATIC_FORMULA_FUNCTIONS).concat(['LOOKUP']);
   const names = varFields.map(f => f.name).concat(Object.keys(crossRefs)).concat(fnNames);
   // Pass raw values (not force-coerced to numbers) — JS arithmetic operators
   // already coerce numeric strings/numbers naturally, but functions like
   // MONTH()/YEAR()/UPPER() need the real date/text value, not a mangled 0.
   const args = varFields.map(f => {
+    if (f.type === 'formula' || f.type === 'rollup') {
+      return resolveComputedField(schema, entity, record, f, visiting, depth);
+    }
     const v = record[f.name];
     const isBlank = v === undefined || v === null || v === '';
     if (isBlank) return isArithmeticFieldType(f.type) ? 0 : '';
@@ -388,6 +535,19 @@ function evalFormula(formula, schema, entity, record, extraScopes, depth) {
     .concat(Object.values(STATIC_FORMULA_FUNCTIONS))
     .concat([makeLookupFn(schema, entity, record, extraScopes, depth)]);
 
+  // SECURITY NOTE: this is eval-adjacent (new Function compiles and runs
+  // the formula text as real JS) and must stay admin-only — untrusted
+  // users must never be allowed to author a formula, full stop. The
+  // safety net here is real but narrow: FORMULA_SAFE_RE whitelists
+  // characters before this point, FORMULA_BANNED_RE blocks dangerous
+  // tokens, and there's no bracket-property access ([]) available in the
+  // compiled body — but none of that is a substitute for "only admins
+  // can reach this code path" as the actual boundary. Also worth knowing
+  // when reading the compiled body during debugging: a chained
+  // cross-table reference like a.b.c leaves __ref0.c behind, not a
+  // second dynamic lookup — a.b resolves to a real value first (via
+  // resolveCrossTableValue above), and .c is then a plain property
+  // access on that already-resolved data.
   try {
     // eslint-disable-next-line no-new-func
     const fn = new Function(...names, `try { return (${workingFormula}); } catch(e) { return '#ERR:' + e.message; }`);
@@ -422,7 +582,9 @@ function rollupSourceRows(schema, parentEntity, parentRecord, hop1Key, hop2Key) 
   return rows;
 }
 
-function computeRollup(schema, field, parentEntity, parentRecord) {
+function computeRollup(schema, field, parentEntity, parentRecord, visiting, depth) {
+  visiting = visiting || new Set();
+  depth = depth || 0;
   const targetKey = field.rollupHop2Entity || field.rollupHop1Entity;
   const targetEntity = schema.entities[targetKey];
   if (!targetEntity) return '#ERR';
@@ -433,7 +595,7 @@ function computeRollup(schema, field, parentEntity, parentRecord) {
     let whereError = null;
     rows = rows.filter(r => {
       if (whereError) return false;
-      const result = evalFormula(field.rollupWhere, schema, targetEntity, r, { parent: { entity: parentEntity, row: parentRecord } }, 0);
+      const result = evalFormula(field.rollupWhere, schema, targetEntity, r, { parent: { entity: parentEntity, row: parentRecord } }, depth, visiting);
       if (isFormulaError(result)) { whereError = result; return false; }
       return result === true;
     });
@@ -610,6 +772,47 @@ function picklistOptions(field) {
   return String(field.options || '').split(',').map(s => s.trim()).filter(Boolean);
 }
 
+// ---- Default values ----------------------------------------------------
+// A field can default to a static value (defaultMode 'static') or a
+// formula (defaultMode 'formula', same language as everywhere else —
+// e.g. TODAY() for a date field). Applies only at creation, never on
+// update. Shared by both the "new record" form (so the admin/user SEES
+// the default and can still change it) and the actual create POST (so
+// an "always read-only" field — which a browser never submits at all,
+// since disabled form fields are excluded from submission — still gets
+// its value set correctly rather than landing blank).
+function coerceDefaultValueForType(field, raw) {
+  if (field.type === 'bool') return raw === 'true' || raw === true;
+  if (field.type === 'number' || field.type === 'currency' || field.type === 'percent') {
+    const n = Number(raw);
+    return isNaN(n) ? '' : n;
+  }
+  return raw;
+}
+
+function computeFieldDefault(schema, entity, field, record) {
+  if (field.defaultMode === 'static' && field.defaultValue !== undefined && field.defaultValue !== '') {
+    return coerceDefaultValueForType(field, field.defaultValue);
+  }
+  if (field.defaultMode === 'formula' && field.defaultFormula && field.defaultFormula.trim()) {
+    const result = evalFormula(field.defaultFormula, schema, entity, record, {}, 0);
+    // A default formula failing (e.g. #ERR) shouldn't ever land a visible
+    // error string in a brand-new record's field — fall back to blank.
+    if (typeof result === 'string' && result.startsWith('#')) return '';
+    return result;
+  }
+  return undefined; // no default configured
+}
+
+function applyFieldDefaults(schema, entity, record) {
+  entity.fields.forEach(f => {
+    if (COMPUTED_TYPES.includes(f.type) || LAYOUT_TYPES.includes(f.type) || f.type === 'image' || f.key) return;
+    const def = computeFieldDefault(schema, entity, f, record);
+    if (def !== undefined) record[f.name] = def;
+  });
+  return record;
+}
+
 // ---- Series (auto-numbered, grouped) fields --------------------------------
 // e.g. a per-landlord bill sequence: BILLS_SeriesNo groups by resolving
 // "BILLS_ClientCode.T_MappedTo" (the bill's tenant's landlord) and tracks
@@ -674,6 +877,28 @@ function getChildren(schema, entityKey) {
 
 function isReferenced(schema, entityKey) {
   return getChildren(schema, entityKey).length > 0;
+}
+
+// Data-level delete guard — unlike isReferenced/getChildren above (which
+// only check whether some OTHER table's SCHEMA has an fk field pointing
+// at this table at all, regardless of actual data), this checks whether
+// any REAL ROW in any such table currently holds a value matching the
+// SPECIFIC record being deleted. Scoped to direct children only (one
+// hop) — deliberately, not multi-hop: since this same check applies
+// uniformly at every delete, a grandchild table can never be silently
+// orphaned either, since deleting its direct parent would already have
+// been blocked one level up first.
+function findBlockingReferences(schema, entityKey, pkValue) {
+  const blockers = [];
+  getChildren(schema, entityKey).forEach(child => {
+    const childEntity = schema.entities[child.entity];
+    const fkField = childEntity.fields.find(f => f.name === child.fk);
+    const matches = db.getChildren(child.entity, child.fk, pkValue);
+    if (matches.length > 0) {
+      blockers.push({ entityKey: child.entity, entityLabel: childEntity.label, fieldLabel: fkField ? fkField.label : child.fk, count: matches.length });
+    }
+  });
+  return blockers;
 }
 
 // ---- Configurable child applets (Views -> Child Applets) ------------------
@@ -742,7 +967,11 @@ function nextAppletInstanceKey(schema, entityKey, baseKey) {
 // relationship can be added more than once with different filters and
 // labels. The Available list in Admin stays clickable even after an
 // applet's already been added, specifically to support this.
-function addApplet(schema, entityKey, baseKey) {
+// Renamed from the original addApplet — a second, unrelated addApplet
+// (schema, input) was added later for the Applet/View/Screen builder,
+// and JS silently let that declaration win, breaking every call to this
+// one. See the critical-security-patch backlog entry for the full story.
+function addChildAppletInstance(schema, entityKey, baseKey) {
   const e = schema.entities[entityKey];
   if (!e) return;
   const valid = discoverApplets(schema, entityKey).some(a => a.appletKey === baseKey);
@@ -819,41 +1048,69 @@ function setAppletFilter(schema, entityKey, instanceKey, input) {
 // just always-on rather than user-adjustable. Degrades gracefully (no
 // filtering) if the configured field no longer exists, though deleteField
 // clears these settings proactively so that shouldn't normally happen.
+// Shared "does this row match?" logic for List filters, Child Applet
+// filters, and Report parameters — the three places in the app that all
+// need the same three behaviors: bool/picklist/fk/text exact match, date
+// range, and number/currency/percent range (with percent scaling).
+// Previously each had its own copy of this logic; consolidated here so a
+// future bugfix or new field-type addition only needs to happen once.
+//
+// `getValue(row)` abstracts away HOW the value is read, since that's the
+// one real difference between callers: List/Applet filters read a field
+// directly off the row (`row[fieldName]`), while Report parameters
+// evaluate a full formula expression (since a parameter can be a
+// cross-table reference, not just a bare field on the row being
+// filtered). `fieldType`/`isPercent` are passed as plain values rather
+// than a whole field object, since Report parameters precompute
+// `isPercent` at definition time rather than holding a real field def.
+function applyFilterCondition(rows, kind, fieldType, isPercent, filterSpec, getValue) {
+  if (kind === 'date-range') {
+    const from = filterSpec.from || '';
+    const to = filterSpec.to || '';
+    if (!from && !to) return rows;
+    return rows.filter(r => {
+      const v = getValue(r);
+      if (!v) return false;
+      if (from && v < from) return false;
+      if (to && v > to) return false;
+      return true;
+    });
+  }
+  if (kind === 'number-range') {
+    const from = filterSpec.from || '';
+    const to = filterSpec.to || '';
+    if (!from && !to) return rows;
+    const scale = isPercent ? 100 : 1;
+    return rows.filter(r => {
+      const n = Number(getValue(r));
+      if (isNaN(n)) return false;
+      const displayVal = n * scale;
+      if (from !== '' && displayVal < Number(from)) return false;
+      if (to !== '' && displayVal > Number(to)) return false;
+      return true;
+    });
+  }
+  const val = filterSpec.value || '';
+  if (!val) return rows;
+  if (fieldType === 'bool') {
+    const want = val === 'true';
+    return rows.filter(r => !!getValue(r) === want);
+  }
+  return rows.filter(r => String(getValue(r) ?? '') === val);
+}
+
 function applyAppletFilter(schema, applet, setting, rows) {
   if (!setting || !setting.filterField) return rows;
   const targetEntity = schema.entities[applet.entity];
   const f = targetEntity && targetEntity.fields.find(fl => fl.name === setting.filterField);
   if (!f) return rows;
   const kind = filterKindFor(f);
-  if (kind === 'date-range') {
-    if (!setting.filterFrom && !setting.filterTo) return rows;
-    return rows.filter(r => {
-      const v = r[setting.filterField];
-      if (!v) return false;
-      if (setting.filterFrom && v < setting.filterFrom) return false;
-      if (setting.filterTo && v > setting.filterTo) return false;
-      return true;
-    });
-  }
-  if (kind === 'number-range') {
-    if (!setting.filterFrom && !setting.filterTo) return rows;
-    const isPercent = f.type === 'percent' || f.format === 'percent';
-    const scale = isPercent ? 100 : 1;
-    return rows.filter(r => {
-      const n = Number(r[setting.filterField]);
-      if (isNaN(n)) return false;
-      const displayVal = n * scale;
-      if (setting.filterFrom !== '' && displayVal < Number(setting.filterFrom)) return false;
-      if (setting.filterTo !== '' && displayVal > Number(setting.filterTo)) return false;
-      return true;
-    });
-  }
-  if (!setting.filterValue) return rows;
-  if (f.type === 'bool') {
-    const want = setting.filterValue === 'true';
-    return rows.filter(r => !!r[setting.filterField] === want);
-  }
-  return rows.filter(r => String(r[setting.filterField] ?? '') === setting.filterValue);
+  const isPercent = f.type === 'percent' || f.format === 'percent';
+  return applyFilterCondition(
+    rows, kind, f.type, isPercent,
+    { from: setting.filterFrom, to: setting.filterTo, value: setting.filterValue },
+    r => r[setting.filterField]
+  );
 }
 
 // Full applet data for a record's detail page: whichever applet INSTANCES
@@ -981,7 +1238,7 @@ function removeNav(schema, entityKey) {
   schema.navOrder = schema.navOrder.filter(k => k !== entityKey);
 }
 
-function addField(schema, entityKey, { name, label, type, ref, required, inList, rows, formula, format, options, seriesGroupPath, seriesTrackerEntity, seriesTrackerGroupField, seriesTrackerCounterField, rollupFn, rollupHop1Entity, rollupHop2Entity, rollupField, rollupOrderField, rollupWhere }) {
+function addField(schema, entityKey, { name, label, type, ref, required, inList, rows, formula, format, options, seriesGroupPath, seriesTrackerEntity, seriesTrackerGroupField, seriesTrackerCounterField, rollupFn, rollupHop1Entity, rollupHop2Entity, rollupField, rollupOrderField, rollupWhere, hint, hintImportant, readOnlyMode, defaultMode, defaultValue, defaultFormula, picklistSource, picklistKey, picklistConstraintField }) {
   const e = schema.entities[entityKey];
   if (!e) throw new Error('Unknown table.');
   if (!name || !String(name).trim()) throw new Error('Field name is required.');
@@ -991,11 +1248,18 @@ function addField(schema, entityKey, { name, label, type, ref, required, inList,
   if (e.fields.some(f => f.name === fname)) throw new Error(`Field "${fname}" already exists on this table.`);
   if (t === 'fk' && (!ref || !schema.entities[ref])) throw new Error('Please choose a table for this lookup field to link to.');
   if (t === 'formula' && (!formula || !formula.trim())) throw new Error('Please enter a formula for this calculated field.');
-  if (t === 'picklist' && (!options || !options.trim())) throw new Error('Please enter at least one option (comma-separated).');
+  const usesGlobalPicklist = t === 'picklist' && picklistSource === 'global';
+  if (t === 'picklist' && !usesGlobalPicklist && (!options || !options.trim())) throw new Error('Please enter at least one option (comma-separated), or choose a Global Picklist instead.');
+  if (usesGlobalPicklist && (!picklistKey || !picklistByKey(schema, picklistKey))) throw new Error('Choose a valid Global Picklist.');
   if (t === 'series' && (!seriesGroupPath || !seriesTrackerEntity || !seriesTrackerGroupField || !seriesTrackerCounterField)) {
     throw new Error('Series fields need a group path, a tracker table, and its group/counter fields.');
   }
   if (t === 'rollup') validateRollupConfig(schema, entityKey, { rollupFn, rollupHop1Entity, rollupHop2Entity, rollupField, rollupOrderField });
+  const isEligibleForReadOnlyAndDefault = !COMPUTED_TYPES.includes(t) && !LAYOUT_TYPES.includes(t);
+  if (isEligibleForReadOnlyAndDefault && readOnlyMode === 'always' && defaultMode !== 'static' && defaultMode !== 'formula' && required) {
+    throw new Error(`This field is required but set to always read-only with no default — it could never actually be filled in. Add a default value, or change one of these two settings.`);
+  }
+  const resolvedDefaultMode = isEligibleForReadOnlyAndDefault && ['static', 'formula'].includes(defaultMode) ? defaultMode : undefined;
   e.fields.push({
     name: fname,
     label: t === 'spacer' ? (label && label.trim() ? label.trim() : '(Spacer)') : label.trim(),
@@ -1007,7 +1271,17 @@ function addField(schema, entityKey, { name, label, type, ref, required, inList,
     rows: t === 'textarea' ? (Number(rows) > 0 ? Number(rows) : 2) : undefined,
     formula: t === 'formula' ? formula.trim() : undefined,
     format: (t === 'formula' || t === 'rollup') ? (['currency', 'percent', 'date', 'datetime'].includes(format) ? format : 'none') : undefined,
-    options: t === 'picklist' ? options.trim() : undefined,
+    options: (t === 'picklist' && !usesGlobalPicklist) ? options.trim() : undefined,
+    picklistSource: t === 'picklist' ? (usesGlobalPicklist ? 'global' : 'custom') : undefined,
+    picklistKey: usesGlobalPicklist ? picklistKey : undefined,
+    // A field ON THIS SAME TABLE whose current value constrains which
+    // options a table-sourced Global Picklist actually offers — e.g. an
+    // Account Type field on this record filtering which Credit Cards
+    // show up, matching against that Picklist's own sourceConstraintField.
+    // No effect on a static-sourced picklist (nothing structured to
+    // filter by there), or if the referenced picklist has no
+    // sourceConstraintField configured at all.
+    picklistConstraintField: usesGlobalPicklist && picklistConstraintField ? picklistConstraintField : undefined,
     seriesGroupPath: t === 'series' ? seriesGroupPath.trim() : undefined,
     seriesTrackerEntity: t === 'series' ? seriesTrackerEntity : undefined,
     seriesTrackerGroupField: t === 'series' ? seriesTrackerGroupField.trim() : undefined,
@@ -1018,6 +1292,20 @@ function addField(schema, entityKey, { name, label, type, ref, required, inList,
     rollupField: t === 'rollup' ? rollupField : undefined,
     rollupOrderField: t === 'rollup' ? (rollupOrderField || undefined) : undefined,
     rollupWhere: t === 'rollup' ? (rollupWhere || '') : undefined,
+    // A free-text reminder/note an admin can attach to ANY field, shown on
+    // the create/edit form near it — not type-specific, since the need
+    // for "don't forget to do X here" applies just as much to a plain
+    // picklist as to anything else. hintImportant renders it as a
+    // red/urgent callout instead of a quiet grey hint, for things that
+    // silently break something if skipped (e.g. "pick or create a Tenant
+    // Group here — reports that group by it won't find this record
+    // otherwise").
+    hint: (hint || '').trim() || undefined,
+    hintImportant: !!hintImportant,
+    readOnlyMode: isEligibleForReadOnlyAndDefault && ['always', 'afterCreation'].includes(readOnlyMode) ? readOnlyMode : undefined,
+    defaultMode: resolvedDefaultMode,
+    defaultValue: resolvedDefaultMode === 'static' ? (defaultValue || '') : undefined,
+    defaultFormula: resolvedDefaultMode === 'formula' ? (defaultFormula || '').trim() : undefined,
   });
   if (inList) addListColumn(schema, entityKey, fname);
 }
@@ -1039,21 +1327,29 @@ function validateRollupConfig(schema, entityKey, { rollupFn, rollupHop1Entity, r
   }
 }
 
-function updateField(schema, entityKey, fieldName, { label, type, ref, required, inList, rows, formula, format, options, seriesGroupPath, seriesTrackerEntity, seriesTrackerGroupField, seriesTrackerCounterField, rollupFn, rollupHop1Entity, rollupHop2Entity, rollupField, rollupOrderField, rollupWhere }) {
+function updateField(schema, entityKey, fieldName, { label, type, ref, required, inList, rows, formula, format, options, seriesGroupPath, seriesTrackerEntity, seriesTrackerGroupField, seriesTrackerCounterField, rollupFn, rollupHop1Entity, rollupHop2Entity, rollupField, rollupOrderField, rollupWhere, hint, hintImportant, readOnlyMode, defaultMode, defaultValue, defaultFormula, picklistSource, picklistKey, picklistConstraintField }) {
   const e = schema.entities[entityKey];
   if (!e) throw new Error('Unknown table.');
   const f = e.fields.find(fl => fl.name === fieldName);
   if (!f) throw new Error('Unknown field.');
   if (label && label.trim()) f.label = label.trim();
-  if (f.key) return; // primary key: label only, type/ref/required stay fixed
+  f.hint = (hint || '').trim() || undefined;
+  f.hintImportant = !!hintImportant;
+  if (f.key) return; // primary key: label/hint only, type/ref/required stay fixed
   const t = FIELD_TYPES.includes(type) ? type : f.type;
   if (t === 'fk' && (!ref || !schema.entities[ref])) throw new Error('Please choose a table for this lookup field to link to.');
   if (t === 'formula' && (!formula || !formula.trim())) throw new Error('Please enter a formula for this calculated field.');
-  if (t === 'picklist' && (!options || !options.trim())) throw new Error('Please enter at least one option (comma-separated).');
+  const usesGlobalPicklist = t === 'picklist' && picklistSource === 'global';
+  if (t === 'picklist' && !usesGlobalPicklist && (!options || !options.trim())) throw new Error('Please enter at least one option (comma-separated), or choose a Global Picklist instead.');
+  if (usesGlobalPicklist && (!picklistKey || !picklistByKey(schema, picklistKey))) throw new Error('Choose a valid Global Picklist.');
   if (t === 'series' && (!seriesGroupPath || !seriesTrackerEntity || !seriesTrackerGroupField || !seriesTrackerCounterField)) {
     throw new Error('Series fields need a group path, a tracker table, and its group/counter fields.');
   }
   if (t === 'rollup') validateRollupConfig(schema, entityKey, { rollupFn, rollupHop1Entity, rollupHop2Entity, rollupField, rollupOrderField });
+  const isEligibleForReadOnlyAndDefault = !COMPUTED_TYPES.includes(t) && !LAYOUT_TYPES.includes(t);
+  if (isEligibleForReadOnlyAndDefault && readOnlyMode === 'always' && defaultMode !== 'static' && defaultMode !== 'formula' && required) {
+    throw new Error(`"${f.label}" is required but set to always read-only with no default — it could never actually be filled in. Add a default value, or change one of these two settings.`);
+  }
   f.type = t;
   f.ref = t === 'fk' ? ref : undefined;
   f.required = (COMPUTED_TYPES.includes(t) || LAYOUT_TYPES.includes(t)) ? false : !!required;
@@ -1061,7 +1357,10 @@ function updateField(schema, entityKey, fieldName, { label, type, ref, required,
   f.rows = t === 'textarea' ? (Number(rows) > 0 ? Number(rows) : (f.rows || 2)) : undefined;
   f.formula = t === 'formula' ? formula.trim() : undefined;
   f.format = (t === 'formula' || t === 'rollup') ? (['currency', 'percent', 'date', 'datetime'].includes(format) ? format : 'none') : undefined;
-  f.options = t === 'picklist' ? options.trim() : undefined;
+  f.options = (t === 'picklist' && !usesGlobalPicklist) ? options.trim() : undefined;
+  f.picklistSource = t === 'picklist' ? (usesGlobalPicklist ? 'global' : 'custom') : undefined;
+  f.picklistKey = usesGlobalPicklist ? picklistKey : undefined;
+  f.picklistConstraintField = usesGlobalPicklist && picklistConstraintField ? picklistConstraintField : undefined;
   f.seriesGroupPath = t === 'series' ? seriesGroupPath.trim() : undefined;
   f.seriesTrackerEntity = t === 'series' ? seriesTrackerEntity : undefined;
   f.seriesTrackerGroupField = t === 'series' ? seriesTrackerGroupField.trim() : undefined;
@@ -1072,16 +1371,59 @@ function updateField(schema, entityKey, fieldName, { label, type, ref, required,
   f.rollupField = t === 'rollup' ? rollupField : undefined;
   f.rollupOrderField = t === 'rollup' ? (rollupOrderField || undefined) : undefined;
   f.rollupWhere = t === 'rollup' ? (rollupWhere || '') : undefined;
+  // Read-only and default value are cross-cutting settings, not tied to
+  // one field type the way formula/rollup/series config is — but they
+  // don't make sense on a field that's already inherently non-editable
+  // (formula/rollup/series/spacer/section), so left undefined there.
+  f.readOnlyMode = isEligibleForReadOnlyAndDefault && ['always', 'afterCreation'].includes(readOnlyMode) ? readOnlyMode : undefined;
+  f.defaultMode = isEligibleForReadOnlyAndDefault && ['static', 'formula'].includes(defaultMode) ? defaultMode : undefined;
+  f.defaultValue = f.defaultMode === 'static' ? (defaultValue || '') : undefined;
+  f.defaultFormula = f.defaultMode === 'formula' ? (defaultFormula || '').trim() : undefined;
 }
 
 // Applies a formula field's configured "Format As" (currency/percent/date/datetime)
 // to its computed value, for consistent display in both list and form views.
+// Renders a field's optional "hint" text (Admin -> Fields) into safe HTML,
+// supporting exactly two Markdown-style patterns and nothing else:
+// **bold** and [link text](url). Deliberately not general HTML/Markdown —
+// the raw text is HTML-escaped FIRST (neutralizing anything that looks
+// like a tag), and only THEN are these two specific patterns recognized
+// and turned into real <strong>/<a> tags. This means a hint can never
+// inject arbitrary HTML no matter what gets pasted into it, while still
+// covering the actual need (a bold reminder with a link to a help
+// article) without a general rich-text editor.
+function renderHintHtml(hint) {
+  if (!hint) return '';
+  let escaped = String(hint)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  // Links: [text](url) — only http(s):// or a relative "/" path are turned
+  // into a real link; anything else (e.g. javascript:) is left as plain
+  // escaped text rather than becoming a clickable link.
+  escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, url) => {
+    if (!/^(https?:\/\/|\/)/i.test(url)) return m;
+    return `<a href="${url}" target="_blank" rel="noopener">${text}</a>`;
+  });
+  // Bold: **text**
+  escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  return escaped;
+}
+
 function formatFormulaValue(field, value) {
   if (value === '#ERR' || value === '' || value === undefined || value === null) return value;
   if (field.format === 'currency') return formatINR(value);
   if (field.format === 'percent') return formatPercent(value);
   if (field.format === 'date') return formatDate(value, false);
   if (field.format === 'datetime') return formatDate(value, true);
+  // 'number' displays the same as 'none' (raw passthrough) — it exists
+  // purely as a declarative signal that a column/aggregate genuinely
+  // produces a number, for Report total-row eligibility (see
+  // validateReportDef) where there's no other way to know: unlike
+  // currency/percent, a plain number doesn't need a display
+  // transformation, just a "yes this is numeric" flag.
   return value;
 }
 
@@ -1259,6 +1601,36 @@ function reorderNav(schema, orderedKeys) {
   schema.navOrder = reorderByKey(schema.navOrder || [], k => k, orderedKeys.filter(k => schema.entities[k]));
 }
 
+// Moves a table's screen from the main nav into Admin's own subnav —
+// removed from navOrder, added to adminSubnavOrder, and gated to
+// admin-only access by virtue of living there (see auth.requirePermission
+// in server.js, which checks entity.inAdmin). Reversible via the
+// counterpart function below.
+function moveEntityToAdmin(schema, entityKey) {
+  const entity = schema.entities[entityKey];
+  if (!entity) throw new Error('Unknown table.');
+  entity.inAdmin = true;
+  schema.navOrder = (schema.navOrder || []).filter(k => k !== entityKey);
+  if (!schema.adminSubnavOrder.includes(entityKey)) schema.adminSubnavOrder.push(entityKey);
+}
+
+function moveEntityOutOfAdmin(schema, entityKey) {
+  const entity = schema.entities[entityKey];
+  if (!entity) throw new Error('Unknown table.');
+  entity.inAdmin = false;
+  schema.adminSubnavOrder = schema.adminSubnavOrder.filter(k => k !== entityKey);
+  if (!schema.navOrder.includes(entityKey)) schema.navOrder.push(entityKey);
+}
+
+// Same reorder-by-key mechanism as reorderNav, but for Admin's own
+// subnav — a mix of fixed page keys (tables, views, ...) and any table
+// keys that have been moved in via moveEntityToAdmin.
+function reorderAdminSubnav(schema, orderedKeys) {
+  if (!Array.isArray(orderedKeys)) return;
+  const valid = orderedKeys.filter(k => ADMIN_SUBNAV_FIXED_KEYS.includes(k) || (schema.entities[k] && schema.entities[k].inAdmin));
+  schema.adminSubnavOrder = reorderByKey(schema.adminSubnavOrder || [], k => k, valid);
+}
+
 // ---- Report-building tool (Admin -> Reports) -------------------------
 // A report is defined as DATA (schema.json), not code — every field
 // reference is a plain string the admin typed in, editable later, never
@@ -1287,11 +1659,36 @@ function validateReportDef(schema, input) {
   if (!baseEntity) throw new Error('Choose a valid base table.');
   if (!input.label || !String(input.label).trim()) throw new Error('Report name is required.');
   const columns = (input.columns || []).filter(c => c && c.expr && c.expr.trim());
-  columns.forEach(c => { if (!c.label || !c.label.trim()) c.label = c.expr; });
+  columns.forEach(c => {
+    if (!c.label || !c.label.trim()) c.label = c.expr;
+    c.total = !!c.total;
+    // A column can only be totaled if it's explicitly declared numeric
+    // (Currency/Percent/Number format) — there's no way to statically know
+    // an arbitrary expression's result type otherwise, so this format
+    // choice doubles as that declaration, the same role Format already
+    // plays for display. Fails loudly rather than silently skipping or
+    // guessing at a non-numeric column.
+    if (c.total && !['currency', 'percent', 'number'].includes(c.format)) {
+      throw new Error(`Column "${c.label}" is marked for totaling but its format is "${c.format || 'none'}" — set it to Currency, Percent, or Number first.`);
+    }
+  });
 
   const groupBy = (input.groupBy || '').trim();
   const aggregates = (input.aggregates || []).filter(a => a && a.expr && a.expr.trim() && a.fn);
-  aggregates.forEach(a => { if (!a.label || !a.label.trim()) a.label = `${a.fn}(${a.expr})`; });
+  aggregates.forEach(a => {
+    if (!a.label || !a.label.trim()) a.label = `${a.fn}(${a.expr})`;
+    a.total = !!a.total;
+    // Unlike columns, an aggregate's output is always genuinely numeric
+    // (SUM/COUNT/AVG/MIN/MAX all coerce to Number already) — but only
+    // SUM and COUNT can be correctly turned into a grand total by
+    // re-summing the per-group values. Averaging per-group averages (or
+    // taking the min/max of per-group mins/maxes) isn't the same as the
+    // true overall AVG/MIN/MAX, so those fail loudly instead of silently
+    // producing a number that looks plausible but is actually wrong.
+    if (a.total && !['SUM', 'COUNT'].includes(a.fn)) {
+      throw new Error(`Aggregate "${a.label}" (${a.fn}) can't be totaled — only SUM and COUNT aggregates can have a grand total across groups; averaging/min/max across groups isn't mathematically valid.`);
+    }
+  });
 
   if (groupBy) {
     if (aggregates.length === 0) throw new Error('A grouped report needs at least one aggregate (e.g. SUM of an amount).');
@@ -1299,21 +1696,109 @@ function validateReportDef(schema, input) {
     throw new Error('Add at least one column.');
   }
 
+  const DATA_KIND_MAP = {
+    text: { kind: 'exact', fieldType: 'text', isPercent: false },
+    bool: { kind: 'exact', fieldType: 'bool', isPercent: false },
+    'date-range': { kind: 'date-range', fieldType: 'date', isPercent: false },
+    'number-range': { kind: 'number-range', fieldType: 'number', isPercent: false },
+    'percent-range': { kind: 'number-range', fieldType: 'percent', isPercent: true },
+  };
+
   const parameters = (input.parameters || []).filter(p => p && p.key && p.field);
   parameters.forEach(p => {
     // Resolve the parameter's field type up front (not guessed later from a
     // runtime value) so its filter control is always statically known —
     // same reasoning FILTERABLE_TYPES/filterKindFor already use elsewhere.
     const resolved = resolveExprField(schema, baseEntity, p.field);
-    if (!resolved) throw new Error(`Parameter "${p.label || p.key}": "${p.field}" doesn't resolve to a real field.`);
-    if (!FILTERABLE_TYPES.includes(resolved.type)) {
-      throw new Error(`Parameter "${p.label || p.key}": "${p.field}" is type "${resolved.type}", which can't be used as a parameter.`);
+    if (resolved) {
+      // Simple case: bare field or one clean cross-table hop — the type
+      // is already sitting in the schema, no explicit declaration needed.
+      if (!FILTERABLE_TYPES.includes(resolved.type)) {
+        throw new Error(`Parameter "${p.label || p.key}": "${p.field}" is type "${resolved.type}", which can't be used as a parameter.`);
+      }
+      p.kind = filterKindFor(resolved);
+      p.fieldType = resolved.type;
+      p.isPercent = resolved.type === 'percent' || resolved.format === 'percent';
+      p.anchorRef = resolved.type === 'fk' ? resolved.ref : null;
+      p.dataKind = '';
+    } else {
+      // Calculated/arbitrary expression (e.g. BILLS_Total - BILLS_RentRecd)
+      // — there's no schema field to read a type from, since the formula
+      // engine doesn't do static type inference, only real evaluation
+      // against real data. The admin must explicitly declare what kind of
+      // value it produces — same "explicit, not guessed" principle Format
+      // already uses for Columns/Aggregates. Fails loudly if they haven't,
+      // rather than silently assuming a default.
+      const dataKind = (p.dataKind || '').trim();
+      if (!dataKind || !DATA_KIND_MAP[dataKind]) {
+        throw new Error(`Parameter "${p.label || p.key}": "${p.field}" is a calculated expression, not a plain field \u2014 choose a Data Kind (Text / Yes-No / Date range / Number range / Percent range) to declare what it produces.`);
+      }
+      const mapped = DATA_KIND_MAP[dataKind];
+      p.kind = mapped.kind;
+      p.fieldType = mapped.fieldType;
+      p.isPercent = mapped.isPercent;
+      p.anchorRef = null;
+      p.dataKind = dataKind;
     }
-    p.kind = filterKindFor(resolved);
-    p.fieldType = resolved.type;
-    p.isPercent = resolved.type === 'percent' || resolved.format === 'percent';
+    // Anchor Table override: a real fk field already declares its target
+    // table in the schema (anchorRef above), but a formula field or a
+    // calculated expression has no such declaration — the formula engine
+    // only produces a value, it doesn't know that value is "meant to be"
+    // a Tenant code versus anything else. When auto-detection didn't
+    // already supply an anchorRef, let the admin explicitly say which
+    // table this parameter's value should be looked up in, so it can
+    // still anchor a Header Panel. Same "explicit, not guessed" pattern
+    // as Data Kind above; a real fk's auto-detected anchorRef always
+    // takes precedence over this if both are somehow present, since the
+    // schema-derived answer is never wrong.
+    if (!p.anchorRef && p.anchorTable && p.anchorTable.trim()) {
+      const anchorEntity = schema.entities[p.anchorTable.trim()];
+      if (!anchorEntity) throw new Error(`Parameter "${p.label || p.key}": Anchor Table "${p.anchorTable}" is not a real table.`);
+      p.anchorRef = anchorEntity.key;
+    } else if (!p.anchorRef) {
+      p.anchorTable = '';
+    }
+    // Anchor Resolver: optional. When the parameter's raw value doesn't
+    // directly identify one row (e.g. a group tag shared by several
+    // records), this condition picks exactly one out of the anchor
+    // table — same formula language as everywhere else, with the
+    // parameter's own value reachable inside it as "ANCHOR.VALUE". Left
+    // blank, the Header Panel falls back to its original behavior:
+    // treating the raw value as a direct primary-key lookup.
+    p.anchorResolver = p.anchorRef ? (p.anchorResolver || '').trim() : '';
     if (!p.label || !p.label.trim()) p.label = p.field;
   });
+
+  // Two parameters sharing the same key would render two form inputs with
+  // the same `name` on the run page — submitting produces a duplicated
+  // query key, which Express's query parser turns into an array rather
+  // than a string, crashing the run page entirely (not a graceful
+  // degradation). Reject at save time instead, naming which key collided.
+  const seenKeys = new Set();
+  parameters.forEach(p => {
+    if (seenKeys.has(p.key)) throw new Error(`Two parameters both use the key "${p.key}" \u2014 parameter keys must be unique within a report.`);
+    seenKeys.add(p.key);
+  });
+
+  // Header Panel: detail-style fields shown above the results table,
+  // evaluated once against whichever record an fk-typed parameter
+  // resolves to (e.g. "Tenant" picked as a parameter -> show that
+  // tenant's + its landlord's info in a panel above the bill list).
+  const headerAnchorParam = (input.headerAnchorParam || '').trim();
+  const headerFields = (input.headerFields || []).filter(h => h && h.expr && h.expr.trim());
+  headerFields.forEach(h => {
+    if (!h.label || !h.label.trim()) h.label = h.expr;
+    h.renderType = h.renderType === 'textarea' ? 'textarea' : 'text';
+    h.rows = h.renderType === 'textarea' ? (Number(h.rows) || 3) : null;
+    h.format = h.format || 'none';
+    h.column = h.column === 'right' ? 'right' : 'left';
+  });
+  if (headerFields.length > 0) {
+    if (!headerAnchorParam) throw new Error('Header panel fields need an anchor parameter \u2014 choose which parameter identifies the record to show.');
+    const anchorParam = parameters.find(p => p.key === headerAnchorParam);
+    if (!anchorParam) throw new Error(`Header anchor parameter "${headerAnchorParam}" is not one of this report's parameters.`);
+    if (!anchorParam.anchorRef) throw new Error(`Header anchor parameter "${headerAnchorParam}" doesn't resolve to a linkable table \u2014 either use a lookup (fk) field, or set an explicit Anchor Table on that parameter.`);
+  }
 
   return {
     key: input.key && input.key.trim() ? input.key.trim() : `${slugify(input.label)}-${Date.now().toString(36)}`,
@@ -1326,6 +1811,8 @@ function validateReportDef(schema, input) {
     groupByLabel: (input.groupByLabel || '').trim() || 'Group',
     aggregates,
     parameters,
+    headerAnchorParam,
+    headerFields,
   };
 }
 
@@ -1400,47 +1887,41 @@ function runReport(schema, reportDef, paramValues) {
 
   (reportDef.parameters || []).forEach(param => {
     const raw = paramValues[param.key];
-    if (param.kind === 'date-range' || param.kind === 'number-range') {
-      const from = (raw && raw.from) || '';
-      const to = (raw && raw.to) || '';
-      if (!from && !to) return;
-      rows = rows.filter(r => {
-        const v = evalFormula(param.field, schema, baseEntity, r, {}, 0);
-        if (param.kind === 'date-range') {
-          if (!v) return false;
-          if (from && v < from) return false;
-          if (to && v > to) return false;
-          return true;
-        }
-        const n = Number(v);
-        if (isNaN(n)) return false;
-        const scale = param.isPercent ? 100 : 1;
-        const dv = n * scale;
-        if (from !== '' && dv < Number(from)) return false;
-        if (to !== '' && dv > Number(to)) return false;
-        return true;
-      });
-    } else {
-      const val = raw || '';
-      if (!val) return;
-      rows = rows.filter(r => {
-        const v = evalFormula(param.field, schema, baseEntity, r, {}, 0);
-        if (param.fieldType === 'bool') return !!v === (val === 'true');
-        return String(v ?? '') === val;
-      });
-    }
+    const filterSpec = (param.kind === 'date-range' || param.kind === 'number-range')
+      ? { from: (raw && raw.from) || '', to: (raw && raw.to) || '' }
+      : { value: raw || '' };
+    rows = applyFilterCondition(
+      rows, param.kind, param.fieldType, param.isPercent, filterSpec,
+      r => evalFormula(param.field, schema, baseEntity, r, {}, 0)
+    );
   });
+
+  const headerPanel = computeHeaderPanel(schema, reportDef, paramValues);
 
   if (!reportDef.groupBy) {
     const cols = reportDef.columns.map(c => c.label);
+    const totalSums = {}; // label -> running raw numeric sum, only for total-eligible columns
+    reportDef.columns.forEach(col => { if (col.total) totalSums[col.label] = 0; });
     const outRows = rows.map(r => {
       const out = {};
       reportDef.columns.forEach(col => {
-        out[col.label] = formatFormulaValue({ format: col.format }, evalFormula(col.expr, schema, baseEntity, r, {}, 0));
+        const raw = evalFormula(col.expr, schema, baseEntity, r, {}, 0);
+        if (col.total) {
+          const n = Number(raw);
+          if (!isNaN(n)) totalSums[col.label] += n;
+        }
+        out[col.label] = formatFormulaValue({ format: col.format }, raw);
       });
       return out;
     });
-    return { mode: 'detail', columns: cols, rows: outRows };
+    const totals = Object.keys(totalSums).length
+      ? cols.reduce((acc, label) => {
+          const col = reportDef.columns.find(c => c.label === label);
+          acc[label] = col.total ? formatFormulaValue({ format: col.format }, totalSums[label]) : null;
+          return acc;
+        }, {})
+      : null;
+    return { mode: 'detail', columns: cols, rows: outRows, headerPanel, totals };
   }
 
   const groups = {};
@@ -1451,16 +1932,476 @@ function runReport(schema, reportDef, paramValues) {
     if (!groups[keyStr]) { groups[keyStr] = []; groupOrder.push(keyStr); }
     groups[keyStr].push(r);
   });
+  const grandTotals = {}; // agg.label -> running raw numeric sum, only for total-eligible (SUM/COUNT) aggregates
+  (reportDef.aggregates || []).forEach(agg => { if (agg.total) grandTotals[agg.label] = 0; });
   const outRows = groupOrder.map(keyStr => {
     const out = { [reportDef.groupByLabel]: keyStr };
     (reportDef.aggregates || []).forEach(agg => {
       const nums = groupRowsFor(groups[keyStr], agg, schema, baseEntity);
-      out[agg.label] = formatFormulaValue({ format: agg.format }, aggregateValues(agg.fn, nums));
+      const rawAggValue = aggregateValues(agg.fn, nums);
+      if (agg.total) grandTotals[agg.label] += (Number(rawAggValue) || 0);
+      out[agg.label] = formatFormulaValue({ format: agg.format }, rawAggValue);
     });
     return out;
   });
   const cols = [reportDef.groupByLabel, ...(reportDef.aggregates || []).map(a => a.label)];
-  return { mode: 'grouped', columns: cols, rows: outRows };
+  const totals = Object.keys(grandTotals).length
+    ? cols.reduce((acc, label) => {
+        const agg = (reportDef.aggregates || []).find(a => a.label === label);
+        acc[label] = (agg && agg.total) ? formatFormulaValue({ format: agg.format }, grandTotals[label]) : null;
+        return acc;
+      }, {})
+    : null;
+  return { mode: 'grouped', columns: cols, rows: outRows, headerPanel, totals };
+}
+
+// Evaluates a report's Header Panel fields (if configured) against
+// whichever record the anchor fk-parameter currently resolves to.
+// Deliberately evaluated against the ANCHOR entity (e.g. "tenants"),
+// not the report's own base table ("bills") — header field expressions
+// are written as if looking directly at that anchor record, so
+// cross-table references from there (e.g. its own linked landlord) work
+// the same way they would on that table's real detail page. Returns
+// null whenever there's nothing to show yet (no header fields
+// configured, or the anchor parameter hasn't been picked/doesn't
+// resolve to a real record) — the run-time page just skips the panel.
+function computeHeaderPanel(schema, reportDef, paramValues) {
+  if (!reportDef.headerFields || reportDef.headerFields.length === 0) return null;
+  if (!reportDef.headerAnchorParam) return null;
+  const anchorParam = (reportDef.parameters || []).find(p => p.key === reportDef.headerAnchorParam);
+  if (!anchorParam || !anchorParam.anchorRef) return null;
+  const anchorEntity = schema.entities[anchorParam.anchorRef];
+  if (!anchorEntity) return null;
+  const anchorValue = paramValues[anchorParam.key];
+  if (!anchorValue) return null;
+
+  let anchorRecord;
+  if (anchorParam.anchorResolver && anchorParam.anchorResolver.trim()) {
+    // Generic case: the parameter's raw value doesn't directly identify a
+    // row (e.g. it's a group tag shared by several records, not a primary
+    // key) — the admin supplies a condition, in the same formula language
+    // as everywhere else, that picks exactly one row out of the anchor
+    // table. The parameter's raw value is exposed inside that condition
+    // as "ANCHOR.VALUE" — a fake single-field scope injected here, using
+    // the exact same extraScopes mechanism "parent.field" (rollups) and
+    // "tableKey.field" (LOOKUP's own scanned row) already use. Nothing
+    // about T_GroupRoot, T_Is_Current, or any other specific field name
+    // is known to this code — it's just evaluating whatever condition
+    // the admin wrote, the same way LOOKUP always has.
+    const anchorValueScope = { ANCHOR: { entity: { key: 'ANCHOR', fields: [{ name: 'VALUE', type: 'text' }] }, row: { VALUE: anchorValue } } };
+    const { matches, conditionError } = findMatchingRows(schema, anchorEntity, anchorParam.anchorResolver, anchorEntity, {}, anchorValueScope, 0);
+    if (conditionError || matches.length !== 1) return null; // no clean single match — panel just doesn't show, same as any other unresolved anchor
+    anchorRecord = matches[0];
+  } else {
+    // Simple case (unchanged): the parameter's raw value directly IS the
+    // anchor entity's primary key (a real fk, or a formula mirroring one).
+    anchorRecord = db.getById(anchorEntity.key, anchorEntity.pk, anchorValue);
+    if (!anchorRecord) return null;
+  }
+
+  const computedRecord = withComputedFields(schema, anchorEntity, anchorRecord);
+  const fields = reportDef.headerFields.map(h => ({
+    label: h.label,
+    value: formatFormulaValue({ format: h.format }, evalFormula(h.expr, schema, anchorEntity, computedRecord, {}, 0)),
+    renderType: h.renderType,
+    rows: h.rows,
+    column: h.column,
+  }));
+  return {
+    left: fields.filter(f => f.column === 'left'),
+    right: fields.filter(f => f.column === 'right'),
+  };
+}
+
+// ---- Applet / View / Screen (Siebel-mapped) --------------------------
+// Stage 1: the schema layer only — data shapes and CRUD, no admin UI or
+// runtime rendering yet (those are later stages). See the backlog's
+// "Architecture: Applet / View / Screen" writeup for the full design and
+// worked example this was built against.
+
+function appletsFor(schema) {
+  return schema.applets || [];
+}
+
+function appletByKey(schema, key) {
+  return (schema.applets || []).find(a => a.key === key) || null;
+}
+
+// An Applet is a reusable, independent list/detail definition bound to
+// one table — NOT tied to any one View, so the same Applet (e.g. "GST
+// Registrations List") can appear as a master-detail child in one View
+// and stand alone in a completely different one.
+function validateApplet(schema, input, existingKey) {
+  const baseEntity = schema.entities[input.baseTable];
+  if (!baseEntity) throw new Error('Choose a valid base table for this applet.');
+  if (!input.label || !String(input.label).trim()) throw new Error('Applet name is required.');
+  const type = input.type === 'detail' ? 'detail' : 'list';
+
+  const key = (existingKey || (input.key && input.key.trim())) || `${slugify(input.label)}-${Date.now().toString(36)}`;
+  const dup = (schema.applets || []).find(a => a.key === key && a.key !== existingKey);
+  if (dup) throw new Error(`An applet with key "${key}" already exists.`);
+
+  let columns = [];
+  if (type === 'list') {
+    columns = (input.columns || []).filter(c => c && c.trim());
+    columns.forEach(colName => {
+      if (!baseEntity.fields.some(f => f.name === colName)) {
+        throw new Error(`Applet "${input.label}": column "${colName}" is not a real field on ${input.baseTable}.`);
+      }
+    });
+  }
+
+  // filterCondition is optional and, like Report conditions, just a
+  // formula string evaluated at run time — not checked for correctness
+  // here beyond being non-empty, matching how Report conditions are
+  // handled (errors surface when actually run, same as any other formula).
+  const filterCondition = (input.filterCondition || '').trim();
+
+  if (input.sortField && !baseEntity.fields.some(f => f.name === input.sortField)) {
+    throw new Error(`Applet "${input.label}": sort field "${input.sortField}" is not a real field on ${input.baseTable}.`);
+  }
+
+  return {
+    key, label: input.label.trim(), type, baseTable: input.baseTable,
+    columns, filterCondition,
+    sortField: input.sortField || '', sortDir: input.sortDir === 'desc' ? 'desc' : 'asc',
+  };
+}
+
+function addApplet(schema, input) {
+  const applet = validateApplet(schema, input);
+  schema.applets.push(applet);
+  return applet;
+}
+
+function updateApplet(schema, key, input) {
+  const idx = (schema.applets || []).findIndex(a => a.key === key);
+  if (idx === -1) throw new Error('Unknown applet.');
+  const applet = validateApplet(schema, { ...input, key }, key);
+  schema.applets[idx] = applet;
+  return applet;
+}
+
+// Blocks deleting an Applet that's still placed in any View — same
+// "block, don't silently orphan" principle already used for deleting a
+// table that other tables still reference.
+function deleteApplet(schema, key) {
+  const usedIn = (schema.views || []).filter(v => (v.applets || []).some(a => a.appletKey === key));
+  if (usedIn.length > 0) {
+    const names = usedIn.map(v => v.label).join(', ');
+    throw new Error(`Cannot delete: this applet is still used in ${usedIn.length} view(s) (${names}) — remove it from those views first.`);
+  }
+  schema.applets = (schema.applets || []).filter(a => a.key !== key);
+}
+
+function viewsFor(schema) {
+  return schema.views || [];
+}
+
+function viewByKey(schema, key) {
+  return (schema.views || []).find(v => v.key === key) || null;
+}
+
+// A View is an ordered collection of Applet *instances* — not the
+// Applets themselves, since the same Applet can appear in more than one
+// View, potentially with a different (or no) parent-link relationship
+// each time. This is where the master-detail relationship actually
+// lives: a child instance names another instance in the SAME view as
+// its parent, plus a linkField — the field, on the child applet's own
+// table, compared against whatever record is selected in the parent
+// instance at run time.
+function validateView(schema, input, existingKey) {
+  if (!input.label || !String(input.label).trim()) throw new Error('View name is required.');
+  const key = (existingKey || (input.key && input.key.trim())) || `${slugify(input.label)}-${Date.now().toString(36)}`;
+  const dup = (schema.views || []).find(v => v.key === key && v.key !== existingKey);
+  if (dup) throw new Error(`A view with key "${key}" already exists.`);
+
+  const rawApplets = (input.applets || []).filter(a => a && a.appletKey);
+  const instanceKeys = new Set();
+  rawApplets.forEach((a, i) => {
+    const instanceKey = (a.instanceKey && a.instanceKey.trim()) || `inst-${i}-${Date.now().toString(36)}`;
+    if (instanceKeys.has(instanceKey)) throw new Error(`View "${input.label}": duplicate applet instance key "${instanceKey}".`);
+    instanceKeys.add(instanceKey);
+    a.instanceKey = instanceKey;
+    if (!appletByKey(schema, a.appletKey)) throw new Error(`View "${input.label}": applet "${a.appletKey}" doesn't exist.`);
+  });
+
+  // Now that every instance's own key is known, validate parent links —
+  // done as a second pass since a child can reference a sibling defined
+  // either before or after it in the input array.
+  rawApplets.forEach(a => {
+    if (!a.parentInstanceKey) { a.linkField = ''; return; }
+    if (a.parentInstanceKey === a.instanceKey) {
+      throw new Error(`View "${input.label}": applet instance "${a.instanceKey}" can't be its own parent.`);
+    }
+    if (!instanceKeys.has(a.parentInstanceKey)) {
+      throw new Error(`View "${input.label}": applet instance "${a.instanceKey}" names a parent ("${a.parentInstanceKey}") that isn't in this view.`);
+    }
+    if (!a.linkField || !a.linkField.trim()) {
+      throw new Error(`View "${input.label}": applet instance "${a.instanceKey}" has a parent but no link field — which field on its own table should be compared against the parent's selected record?`);
+    }
+    const childApplet = appletByKey(schema, a.appletKey);
+    const childEntity = schema.entities[childApplet.baseTable];
+    if (!childEntity.fields.some(f => f.name === a.linkField)) {
+      throw new Error(`View "${input.label}": link field "${a.linkField}" is not a real field on ${childApplet.baseTable}.`);
+    }
+  });
+
+  // Simple, direct-cycle guard (A's parent is B, B's parent is A) — full
+  // arbitrary-depth cycle detection isn't built yet since the confirmed
+  // use case is two levels deep (one parent, one child), not longer
+  // chains; worth revisiting if deeper nesting turns out to be needed.
+  rawApplets.forEach(a => {
+    if (!a.parentInstanceKey) return;
+    const parent = rawApplets.find(p => p.instanceKey === a.parentInstanceKey);
+    if (parent && parent.parentInstanceKey === a.instanceKey) {
+      throw new Error(`View "${input.label}": applet instances "${a.instanceKey}" and "${parent.instanceKey}" name each other as parent — that's a cycle, not a hierarchy.`);
+    }
+  });
+
+  const applets = rawApplets.map((a, i) => ({
+    instanceKey: a.instanceKey, appletKey: a.appletKey, position: i,
+    parentInstanceKey: a.parentInstanceKey || null, linkField: a.linkField || '',
+  }));
+
+  return { key, label: input.label.trim(), applets };
+}
+
+function addView(schema, input) {
+  const view = validateView(schema, input);
+  schema.views.push(view);
+  return view;
+}
+
+function updateView(schema, key, input) {
+  const idx = (schema.views || []).findIndex(v => v.key === key);
+  if (idx === -1) throw new Error('Unknown view.');
+  const view = validateView(schema, { ...input, key }, key);
+  schema.views[idx] = view;
+  return view;
+}
+
+function deleteView(schema, key) {
+  const usedIn = (schema.screens || []).filter(s => (s.views || []).some(v => v.viewKey === key));
+  if (usedIn.length > 0) {
+    const names = usedIn.map(s => s.label).join(', ');
+    throw new Error(`Cannot delete: this view is still used in ${usedIn.length} screen(s) (${names}) — remove it from those screens first.`);
+  }
+  schema.views = (schema.views || []).filter(v => v.key !== key);
+}
+
+function reorderViewApplets(schema, viewKey, orderedInstanceKeys) {
+  const view = viewByKey(schema, viewKey);
+  if (!view) throw new Error('Unknown view.');
+  if (!Array.isArray(orderedInstanceKeys)) return;
+  view.applets = reorderByKey(view.applets || [], a => a.instanceKey, orderedInstanceKeys)
+    .map((a, i) => ({ ...a, position: i }));
+}
+
+function screensFor(schema) {
+  return schema.screens || [];
+}
+
+function screenByKey(schema, key) {
+  return (schema.screens || []).find(s => s.key === key) || null;
+}
+
+// A Screen is an ordered collection of Views — same idea as today's nav
+// tab, just no longer assumed to be exactly one table.
+function validateScreen(schema, input, existingKey) {
+  if (!input.label || !String(input.label).trim()) throw new Error('Screen name is required.');
+  const key = (existingKey || (input.key && input.key.trim())) || `${slugify(input.label)}-${Date.now().toString(36)}`;
+  const dup = (schema.screens || []).find(s => s.key === key && s.key !== existingKey);
+  if (dup) throw new Error(`A screen with key "${key}" already exists.`);
+
+  const rawViews = (input.views || []).filter(v => v && v.viewKey);
+  rawViews.forEach(v => {
+    if (!viewByKey(schema, v.viewKey)) throw new Error(`Screen "${input.label}": view "${v.viewKey}" doesn't exist.`);
+  });
+  const views = rawViews.map((v, i) => ({ viewKey: v.viewKey, position: i }));
+
+  return { key, label: input.label.trim(), views };
+}
+
+function addScreen(schema, input) {
+  const screen = validateScreen(schema, input);
+  schema.screens.push(screen);
+  return screen;
+}
+
+function updateScreen(schema, key, input) {
+  const idx = (schema.screens || []).findIndex(s => s.key === key);
+  if (idx === -1) throw new Error('Unknown screen.');
+  const screen = validateScreen(schema, { ...input, key }, key);
+  schema.screens[idx] = screen;
+  return screen;
+}
+
+function deleteScreen(schema, key) {
+  schema.screens = (schema.screens || []).filter(s => s.key !== key);
+}
+
+function reorderScreenViews(schema, screenKey, orderedViewKeys) {
+  const screen = screenByKey(schema, screenKey);
+  if (!screen) throw new Error('Unknown screen.');
+  if (!Array.isArray(orderedViewKeys)) return;
+  screen.views = reorderByKey(screen.views || [], v => v.viewKey, orderedViewKeys)
+    .map((v, i) => ({ ...v, position: i }));
+}
+
+// ---- Global Picklists (Admin -> Picklists) ------------------------------
+
+function picklistsFor(schema) {
+  return schema.picklists || [];
+}
+
+function picklistByKey(schema, key) {
+  return (schema.picklists || []).find(p => p.key === key) || null;
+}
+
+function validatePicklist(schema, input, existingKey) {
+  if (!input.label || !String(input.label).trim()) throw new Error('Picklist name is required.');
+  const key = (existingKey || (input.key && input.key.trim())) || `${slugify(input.label)}-${Date.now().toString(36)}`;
+  const dup = (schema.picklists || []).find(p => p.key === key && p.key !== existingKey);
+  if (dup) throw new Error(`A picklist with key "${key}" already exists.`);
+  const sourceType = input.sourceType === 'table' ? 'table' : 'static';
+
+  if (sourceType === 'table') {
+    const sourceEntity = schema.entities[input.sourceTable];
+    if (!sourceEntity) throw new Error('Choose a valid source table.');
+    // sourceValueField is intentionally allowed blank at creation — the
+    // two-step flow (create with just a table, then configure which
+    // field on the EDIT page, once real fields from that table can be
+    // shown) matches how the Applet builder already handles this same
+    // "need the table fixed before its fields can be offered" shape.
+    // Still validated as a real field if actually provided, though.
+    if (input.sourceValueField && !sourceEntity.fields.some(f => f.name === input.sourceValueField)) {
+      throw new Error(`"${input.sourceValueField}" is not a real field on ${input.sourceTable}.`);
+    }
+    if (input.sourceConstraintField && !sourceEntity.fields.some(f => f.name === input.sourceConstraintField)) {
+      throw new Error(`"${input.sourceConstraintField}" is not a real field on ${input.sourceTable}.`);
+    }
+    return {
+      key, label: input.label.trim(), sourceType,
+      sourceTable: input.sourceTable, sourceValueField: input.sourceValueField || '',
+      sourceConstraintField: input.sourceConstraintField || '',
+      values: [],
+    };
+  }
+
+  const rawValues = (input.values || []).map(v => (typeof v === 'string' ? v : v.value)).filter(v => v && v.trim());
+  const seen = new Set();
+  const values = [];
+  rawValues.forEach(v => {
+    const trimmed = v.trim();
+    if (seen.has(trimmed)) return; // silently dedupe rather than error — easy to paste/type the same value twice
+    seen.add(trimmed);
+    values.push({ value: trimmed, active: true });
+  });
+  return { key, label: input.label.trim(), sourceType: 'static', values, sourceTable: '', sourceValueField: '', sourceConstraintField: '' };
+}
+
+function addPicklist(schema, input) {
+  const picklist = validatePicklist(schema, input);
+  schema.picklists.push(picklist);
+  return picklist;
+}
+
+function updatePicklist(schema, key, input) {
+  const idx = (schema.picklists || []).findIndex(p => p.key === key);
+  if (idx === -1) throw new Error('Unknown picklist.');
+  const existing = schema.picklists[idx];
+  const updated = validatePicklist(schema, { ...input, key }, key);
+  // Preserve existing static values' active flags across a re-save (the
+  // edit form resubmits the full value list every time — without this, a
+  // previously-deactivated value would silently reactivate).
+  if (updated.sourceType === 'static' && existing.sourceType === 'static') {
+    const priorActive = new Map((existing.values || []).map(v => [v.value, v.active]));
+    updated.values.forEach(v => { if (priorActive.has(v.value)) v.active = priorActive.get(v.value); });
+  }
+  schema.picklists[idx] = updated;
+  return updated;
+}
+
+// Blocks deleting a Picklist that's still referenced by any field —
+// same "block, don't silently orphan" principle used elsewhere.
+function deletePicklist(schema, key) {
+  const usedBy = [];
+  Object.values(schema.entities).forEach(e => {
+    e.fields.forEach(f => {
+      if (f.type === 'picklist' && f.picklistSource === 'global' && f.picklistKey === key) {
+        usedBy.push(`${e.label}.${f.label}`);
+      }
+    });
+  });
+  if (usedBy.length > 0) {
+    throw new Error(`Cannot delete: still used by ${usedBy.length} field(s) (${usedBy.join(', ')}) — change those fields to a custom or different picklist first.`);
+  }
+  schema.picklists = (schema.picklists || []).filter(p => p.key !== key);
+}
+
+function setPicklistValueActive(schema, key, value, active) {
+  const picklist = picklistByKey(schema, key);
+  if (!picklist || picklist.sourceType !== 'static') throw new Error('Unknown static picklist.');
+  const v = (picklist.values || []).find(x => x.value === value);
+  if (!v) throw new Error('Unknown value.');
+  v.active = !!active;
+}
+
+// The actual options a picklist-type field should offer right now. Same
+// signature spirit as picklistOptions() above — that one only ever
+// handled the 'custom' (raw comma-separated string) source; this is the
+// unified entry point covering both sources, called wherever a
+// picklist's real, current options are needed (rendering a form,
+// validating a submitted value, etc.). `record` is optional — needed
+// only to resolve a constrained table-sourced picklist's filter value;
+// omitted, a table-sourced picklist simply returns every value
+// unfiltered.
+function resolvePicklistOptions(schema, entity, field, record) {
+  if (field.picklistSource !== 'global' || !field.picklistKey) {
+    return picklistOptions(field);
+  }
+  const picklist = picklistByKey(schema, field.picklistKey);
+  if (!picklist) return [];
+  if (picklist.sourceType === 'static') {
+    return (picklist.values || []).filter(v => v.active).map(v => v.value);
+  }
+  const sourceEntity = schema.entities[picklist.sourceTable];
+  if (!sourceEntity) return [];
+  let rows = db.getAll(picklist.sourceTable);
+  if (picklist.sourceConstraintField && field.picklistConstraintField && record) {
+    const constraintVal = record[field.picklistConstraintField];
+    if (constraintVal !== undefined && constraintVal !== '') {
+      rows = rows.filter(r => String(r[picklist.sourceConstraintField]) === String(constraintVal));
+    }
+  }
+  const values = rows.map(r => r[picklist.sourceValueField]).filter(v => v !== undefined && v !== null && v !== '');
+  return [...new Set(values.map(String))];
+}
+
+// Richer variant specifically for rendering a create/edit form. A plain
+// (non-constrained) picklist just needs its current options, same as
+// resolvePicklistOptions above — but a CONSTRAINED table-sourced picklist
+// needs more: the constraint field's value can change live as the user
+// fills out the form (e.g. picking Account Type before Card), so the
+// initial server-rendered options aren't enough on their own. Returns
+// the full unfiltered option set too, each tagged with its own
+// constraint value, so client-side JS can re-filter without a server
+// round-trip when the constraining sibling field changes.
+function resolvePicklistOptionsForForm(schema, entity, field, record) {
+  const options = resolvePicklistOptions(schema, entity, field, record);
+  if (field.picklistSource !== 'global' || !field.picklistKey || !field.picklistConstraintField) {
+    return { options, constrainedBy: null, allOptionsWithConstraint: [] };
+  }
+  const picklist = picklistByKey(schema, field.picklistKey);
+  if (!picklist || picklist.sourceType !== 'table' || !picklist.sourceConstraintField) {
+    return { options, constrainedBy: null, allOptionsWithConstraint: [] };
+  }
+  const rows = db.getAll(picklist.sourceTable);
+  const allOptionsWithConstraint = rows
+    .filter(r => r[picklist.sourceValueField] !== undefined && r[picklist.sourceValueField] !== null && r[picklist.sourceValueField] !== '')
+    .map(r => ({ value: String(r[picklist.sourceValueField]), constraintValue: String(r[picklist.sourceConstraintField] ?? '') }));
+  return { options, constrainedBy: field.picklistConstraintField, allOptionsWithConstraint };
 }
 
 function groupRowsFor(groupRows, agg, schema, baseEntity) {
@@ -1471,16 +2412,20 @@ function groupRowsFor(groupRows, agg, schema, baseEntity) {
 }
 
 module.exports = {
-  FIELD_TYPES, LAYOUT_TYPES, COMPUTED_TYPES, FILTERABLE_TYPES, filterKindFor, load, persist, slugify, safeFieldName, display, listTitle, detailTitle, listFieldsFor, filterFieldsFor,
-  formatINR, formatPercent, formatDate, formatFormulaValue, evalFormula, withComputedFields, resolveCrossTableValue,
-  picklistOptions, assignSeriesFields, getChildren, isReferenced,
-  addEntity, updateEntitySettings, deleteEntity, moveNav, addNav, removeNav,
+  FIELD_TYPES, LAYOUT_TYPES, COMPUTED_TYPES, FILTERABLE_TYPES, filterKindFor, load, normalizeSchema, persist, slugify, safeFieldName, display, listTitle, detailTitle, listFieldsFor, filterFieldsFor,
+  formatINR, formatPercent, formatDate, formatFormulaValue, renderHintHtml, evalFormula, withComputedFields, resolveCrossTableValue,
+  picklistOptions, assignSeriesFields, getChildren, isReferenced, findBlockingReferences, computeFieldDefault, applyFieldDefaults,
+  addEntity, updateEntitySettings, deleteEntity, moveNav, addNav, removeNav, moveEntityToAdmin, moveEntityOutOfAdmin, reorderAdminSubnav, ADMIN_SUBNAV_FIXED_PAGES,
   addField, updateField, deleteField, moveField,
   updateViewSort, addListColumn, removeListColumn, moveListColumn,
   addFilterField, removeFilterField, moveFilterField,
   reorderFields, reorderListColumns, reorderFilterFields, reorderNav,
   PAYQR_FIELD_ROLES, updatePayqrSettings, payqrEligibleFields, payqrPayeePkField, payqrPaymentToPayeeFkField,
   SESSION_TIMEOUT_MIN, SESSION_TIMEOUT_MAX, updateSessionTimeout,
-  discoverApplets, appletSettingsFor, addApplet, removeApplet, reorderApplets, setAppletFilter, computeAppletData,
+  discoverApplets, appletSettingsFor, addChildAppletInstance, removeApplet, reorderApplets, setAppletFilter, computeAppletData, applyFilterCondition,
   reportDefsFor, reportDefByKey, addReportDef, updateReportDef, deleteReportDef, duplicateReportDef, runReport, resolveExprField, aggregateValues,
+  appletsFor, appletByKey, addApplet, updateApplet, deleteApplet,
+  viewsFor, viewByKey, addView, updateView, deleteView, reorderViewApplets,
+  screensFor, screenByKey, addScreen, updateScreen, deleteScreen, reorderScreenViews,
+  picklistsFor, picklistByKey, addPicklist, updatePicklist, deletePicklist, setPicklistValueActive, resolvePicklistOptions, resolvePicklistOptionsForForm,
 };

@@ -11,6 +11,7 @@ const multer = require('multer');
 const archiver = require('archiver');
 const AdmZip = require('adm-zip');
 const schemaLib = require('../schema');
+const { atomicWriteFileSync } = require('../fsutil');
 const db = require('../db');
 const usersLib = require('../users');
 const audit = require('../audit');
@@ -42,10 +43,18 @@ function uploadBackupMiddleware(req, res, next) {
 }
 
 router.use((req, res, next) => {
-  req.schema = schemaLib.load();
+  // server.js's own global middleware already loads the schema fresh for
+  // every request before any route (including this router) is reached —
+  // reloading it again here was pure waste, not a correctness issue,
+  // since both loads would always see the same on-disk state within one
+  // request. Falls back to a fresh load only if req.schema somehow isn't
+  // already set (e.g. this router used standalone in some other context).
+  req.schema = req.schema || schemaLib.load();
   res.locals.navOrder = req.schema.navOrder;
   res.locals.entities = req.schema.entities;
   res.locals.activeKey = 'admin';
+  res.locals.adminSubnavOrder = req.schema.adminSubnavOrder;
+  res.locals.adminSubnavFixedPages = schemaLib.ADMIN_SUBNAV_FIXED_PAGES;
   next();
 });
 
@@ -118,6 +127,20 @@ router.get('/help', (req, res) => {
   res.render('admin/help', {});
 });
 
+// ---- Getting Started / Journey ------------------------------------------
+// A narrative, story-style walkthrough of actually using the app end to
+// end — as opposed to /help above, which is a function-by-function
+// formula reference. This is the thing meant to let a brand-new user run
+// the whole app without the person who built it ever having to explain
+// anything in person. STANDING INSTRUCTION: revisit and update this
+// whenever a meaningfully new feature ships, the same way README.md gets
+// kept current for developers — this is that same habit, aimed at an
+// actual end user instead.
+
+router.get('/journey', (req, res) => {
+  res.render('admin/journey', {});
+});
+
 // ---- Idle session timeout settings ----------------------------------------
 
 router.get('/session-settings', (req, res) => {
@@ -154,16 +177,23 @@ function reportFormArrays(body) {
   // in the form become "user didn't fill this one in," with no JS needed
   // to add/remove rows client-side.
   const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
-  const colExpr = arr(body.col_expr), colLabel = arr(body.col_label), colFormat = arr(body.col_format);
-  const columns = colExpr.map((expr, i) => ({ expr, label: colLabel[i] || '', format: colFormat[i] || 'none' }));
+  const colExpr = arr(body.col_expr), colLabel = arr(body.col_label), colFormat = arr(body.col_format), colTotal = arr(body.col_total);
+  const columns = colExpr.map((expr, i) => ({ expr, label: colLabel[i] || '', format: colFormat[i] || 'none', total: colTotal[i] === '1' }));
 
-  const paramKey = arr(body.param_key), paramLabel = arr(body.param_label), paramField = arr(body.param_field);
-  const parameters = paramField.map((field, i) => ({ key: paramKey[i] || '', label: paramLabel[i] || '', field }));
+  const paramKey = arr(body.param_key), paramLabel = arr(body.param_label), paramField = arr(body.param_field), paramDataKind = arr(body.param_datakind), paramAnchorTable = arr(body.param_anchortable), paramAnchorResolver = arr(body.param_anchorresolver);
+  const parameters = paramField.map((field, i) => ({ key: paramKey[i] || '', label: paramLabel[i] || '', field, dataKind: paramDataKind[i] || '', anchorTable: paramAnchorTable[i] || '', anchorResolver: paramAnchorResolver[i] || '' }));
 
-  const aggExpr = arr(body.agg_expr), aggFn = arr(body.agg_fn), aggLabel = arr(body.agg_label), aggFormat = arr(body.agg_format);
-  const aggregates = aggExpr.map((expr, i) => ({ expr, fn: aggFn[i] || 'SUM', label: aggLabel[i] || '', format: aggFormat[i] || 'none' }));
+  const aggExpr = arr(body.agg_expr), aggFn = arr(body.agg_fn), aggLabel = arr(body.agg_label), aggFormat = arr(body.agg_format), aggTotal = arr(body.agg_total);
+  const aggregates = aggExpr.map((expr, i) => ({ expr, fn: aggFn[i] || 'SUM', label: aggLabel[i] || '', format: aggFormat[i] || 'none', total: aggTotal[i] === '1' }));
 
-  return { columns, parameters, aggregates };
+  const hdrExpr = arr(body.hdr_expr), hdrLabel = arr(body.hdr_label), hdrRenderType = arr(body.hdr_rendertype),
+        hdrRows = arr(body.hdr_rows), hdrFormat = arr(body.hdr_format), hdrColumn = arr(body.hdr_column);
+  const headerFields = hdrExpr.map((expr, i) => ({
+    expr, label: hdrLabel[i] || '', renderType: hdrRenderType[i] || 'text',
+    rows: hdrRows[i] || '', format: hdrFormat[i] || 'none', column: hdrColumn[i] || 'left',
+  }));
+
+  return { columns, parameters, aggregates, headerFields };
 }
 
 router.get('/reports', (req, res) => {
@@ -179,8 +209,8 @@ router.get('/reports/new', (req, res) => {
 router.post('/reports', (req, res) => {
   const schema = req.schema;
   try {
-    const { columns, parameters, aggregates } = reportFormArrays(req.body);
-    const def = schemaLib.addReportDef(schema, { ...req.body, columns, parameters, aggregates });
+    const { columns, parameters, aggregates, headerFields } = reportFormArrays(req.body);
+    const def = schemaLib.addReportDef(schema, { ...req.body, columns, parameters, aggregates, headerFields });
     schemaLib.persist(schema);
     res.redirect('/admin/reports?notice=' + encodeURIComponent(`"${def.label}" created.`));
   } catch (err) {
@@ -197,8 +227,8 @@ router.get('/reports/:key/edit', (req, res) => {
 router.post('/reports/:key', (req, res) => {
   const schema = req.schema;
   try {
-    const { columns, parameters, aggregates } = reportFormArrays(req.body);
-    const def = schemaLib.updateReportDef(schema, req.params.key, { ...req.body, columns, parameters, aggregates });
+    const { columns, parameters, aggregates, headerFields } = reportFormArrays(req.body);
+    const def = schemaLib.updateReportDef(schema, req.params.key, { ...req.body, columns, parameters, aggregates, headerFields });
     schemaLib.persist(schema);
     res.redirect('/admin/reports?notice=' + encodeURIComponent(`"${def.label}" saved.`));
   } catch (err) {
@@ -224,6 +254,262 @@ router.post('/reports/:key/duplicate', (req, res) => {
   }
 });
 
+// ---- Applets (Applet / View / Screen, stage 2) -------------------------
+// An Applet is created minimally first (label, type, base table), then
+// edited — same two-step convention Reports already uses for baseTable,
+// since the columns/filter/sort config below genuinely needs the base
+// table to already be fixed and known (real checkboxes/dropdowns against
+// its actual fields, not a client-side reload as the table changes).
+
+router.get('/applets', (req, res) => {
+  res.render('admin/applets', { applets: schemaLib.appletsFor(req.schema), notice: req.query.notice, error: req.query.error });
+});
+
+router.get('/applets/new', (req, res) => {
+  res.render('admin/applet-edit', { applet: null, entities: req.schema.entities, error: req.query.error, notice: req.query.notice });
+});
+
+router.post('/applets', (req, res) => {
+  const schema = req.schema;
+  try {
+    const applet = schemaLib.addApplet(schema, req.body);
+    schemaLib.persist(schema);
+    res.redirect(`/admin/applets/${applet.key}/edit?notice=` + encodeURIComponent(`"${applet.label}" created \u2014 now set up its columns/filter below.`));
+  } catch (err) {
+    res.redirect('/admin/applets/new?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.get('/applets/:key/edit', (req, res) => {
+  const applet = schemaLib.appletByKey(req.schema, req.params.key);
+  if (!applet) return res.status(404).send('Unknown applet.');
+  res.render('admin/applet-edit', { applet, entities: req.schema.entities, error: req.query.error, notice: req.query.notice });
+});
+
+router.post('/applets/:key', (req, res) => {
+  const schema = req.schema;
+  try {
+    const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
+    const applet = schemaLib.updateApplet(schema, req.params.key, { ...req.body, columns: arr(req.body.columns) });
+    schemaLib.persist(schema);
+    res.redirect('/admin/applets?notice=' + encodeURIComponent(`"${applet.label}" saved.`));
+  } catch (err) {
+    res.redirect(`/admin/applets/${req.params.key}/edit?error=` + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/applets/:key/delete', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.deleteApplet(schema, req.params.key);
+    schemaLib.persist(schema);
+    res.redirect('/admin/applets?notice=' + encodeURIComponent('Applet deleted.'));
+  } catch (err) {
+    res.redirect('/admin/applets?error=' + encodeURIComponent(err.message));
+  }
+});
+
+// ---- Views (Applet / View / Screen, stage 3) ----------------------------
+// A View is an ordered list of Applet *instances*. The tricky UI bit:
+// letting the admin say "this row's parent is that row", when rows have
+// no stable identity until saved (same situation Report Columns already
+// live with — a fresh row is just blank inputs). Solved the same way:
+// the admin references a parent by its 1-based ROW POSITION in the form
+// ("Row 1", "Row 2", ...) rather than some opaque instance key, and the
+// server translates position -> the actual instanceKey it assigns (by
+// array order, every save) before handing off to validateView.
+
+function viewFormApplets(body) {
+  const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
+  const appletKeys = arr(body.applet_key);
+  const parentPositions = arr(body.parent_position); // 1-based strings, or ''
+  const linkFields = arr(body.link_field);
+  const rows = appletKeys
+    .map((appletKey, i) => ({ appletKey, parentPosition: parentPositions[i], linkField: linkFields[i] }))
+    .filter(r => r.appletKey && r.appletKey.trim());
+  const instanceKeys = rows.map((r, i) => `inst${i}`);
+  return rows.map((r, i) => {
+    let parentInstanceKey = null;
+    if (r.parentPosition && r.parentPosition.trim()) {
+      const parentIdx = parseInt(r.parentPosition, 10) - 1;
+      if (isNaN(parentIdx) || parentIdx < 0 || parentIdx >= instanceKeys.length) {
+        throw new Error(`Row ${i + 1}: "Row ${r.parentPosition}" as a parent doesn't refer to a row that actually exists here.`);
+      }
+      if (parentIdx === i) {
+        throw new Error(`Row ${i + 1}: can't be its own parent.`);
+      }
+      parentInstanceKey = instanceKeys[parentIdx];
+    }
+    return { instanceKey: instanceKeys[i], appletKey: r.appletKey, parentInstanceKey, linkField: r.linkField || '' };
+  });
+}
+
+router.get('/composed-views', (req, res) => {
+  res.render('admin/views-list', { views: schemaLib.viewsFor(req.schema), applets: schemaLib.appletsFor(req.schema), notice: req.query.notice, error: req.query.error });
+});
+
+router.get('/composed-views/new', (req, res) => {
+  res.render('admin/view-edit', { view: null, applets: schemaLib.appletsFor(req.schema), entities: req.schema.entities, error: req.query.error, notice: req.query.notice });
+});
+
+router.post('/composed-views', (req, res) => {
+  const schema = req.schema;
+  try {
+    const applets = viewFormApplets(req.body);
+    const view = schemaLib.addView(schema, { ...req.body, applets });
+    schemaLib.persist(schema);
+    res.redirect('/admin/composed-views?notice=' + encodeURIComponent(`"${view.label}" created.`));
+  } catch (err) {
+    res.redirect('/admin/composed-views/new?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.get('/composed-views/:key/edit', (req, res) => {
+  const view = schemaLib.viewByKey(req.schema, req.params.key);
+  if (!view) return res.status(404).send('Unknown view.');
+  res.render('admin/view-edit', { view, applets: schemaLib.appletsFor(req.schema), entities: req.schema.entities, error: req.query.error, notice: req.query.notice });
+});
+
+router.post('/composed-views/:key', (req, res) => {
+  const schema = req.schema;
+  try {
+    const applets = viewFormApplets(req.body);
+    const view = schemaLib.updateView(schema, req.params.key, { ...req.body, applets });
+    schemaLib.persist(schema);
+    res.redirect('/admin/composed-views?notice=' + encodeURIComponent(`"${view.label}" saved.`));
+  } catch (err) {
+    res.redirect(`/admin/composed-views/${req.params.key}/edit?error=` + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/composed-views/:key/delete', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.deleteView(schema, req.params.key);
+    schemaLib.persist(schema);
+    res.redirect('/admin/composed-views?notice=' + encodeURIComponent('View deleted.'));
+  } catch (err) {
+    res.redirect('/admin/composed-views?error=' + encodeURIComponent(err.message));
+  }
+});
+
+// ---- Screens (Applet / View / Screen, stage 4) --------------------------
+// A Screen is an ordered collection of Views, referenced by their real,
+// stable key — unlike the View form's Parent Row, there's no position-
+// reference hazard here, so drag-to-reorder is safe and used.
+
+router.get('/screens', (req, res) => {
+  res.render('admin/screens-list', { screens: schemaLib.screensFor(req.schema), views: schemaLib.viewsFor(req.schema), notice: req.query.notice, error: req.query.error });
+});
+
+router.get('/screens/new', (req, res) => {
+  res.render('admin/screen-edit', { screen: null, views: schemaLib.viewsFor(req.schema), error: req.query.error, notice: req.query.notice });
+});
+
+router.post('/screens', (req, res) => {
+  const schema = req.schema;
+  try {
+    const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
+    const viewKeys = arr(req.body.view_key).filter(k => k && k.trim());
+    const screen = schemaLib.addScreen(schema, { ...req.body, views: viewKeys.map(k => ({ viewKey: k })) });
+    schemaLib.persist(schema);
+    res.redirect('/admin/screens?notice=' + encodeURIComponent(`"${screen.label}" created.`));
+  } catch (err) {
+    res.redirect('/admin/screens/new?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.get('/screens/:key/edit', (req, res) => {
+  const screen = schemaLib.screenByKey(req.schema, req.params.key);
+  if (!screen) return res.status(404).send('Unknown screen.');
+  res.render('admin/screen-edit', { screen, views: schemaLib.viewsFor(req.schema), error: req.query.error, notice: req.query.notice });
+});
+
+router.post('/screens/:key', (req, res) => {
+  const schema = req.schema;
+  try {
+    const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
+    const viewKeys = arr(req.body.view_key).filter(k => k && k.trim());
+    const screen = schemaLib.updateScreen(schema, req.params.key, { ...req.body, views: viewKeys.map(k => ({ viewKey: k })) });
+    schemaLib.persist(schema);
+    res.redirect('/admin/screens?notice=' + encodeURIComponent(`"${screen.label}" saved.`));
+  } catch (err) {
+    res.redirect(`/admin/screens/${req.params.key}/edit?error=` + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/screens/:key/delete', (req, res) => {
+  const schema = req.schema;
+  schemaLib.deleteScreen(schema, req.params.key);
+  schemaLib.persist(schema);
+  res.redirect('/admin/screens?notice=' + encodeURIComponent('Screen deleted.'));
+});
+
+// ---- Global Picklists ("List of Values") --------------------------------
+// Two source shapes, handled by one form: static (admin-typed values,
+// each individually deactivatable) and table (options pulled live from
+// a real table's field, optionally constrained by a field on whichever
+// record is using this picklist). See schema.js's validatePicklist/
+// resolvePicklistOptions for the actual logic this configures.
+
+router.get('/picklists', (req, res) => {
+  res.render('admin/picklists', { picklists: schemaLib.picklistsFor(req.schema), notice: req.query.notice, error: req.query.error });
+});
+
+router.get('/picklists/new', (req, res) => {
+  res.render('admin/picklist-edit', { picklist: null, entities: req.schema.entities, error: req.query.error });
+});
+
+router.post('/picklists', (req, res) => {
+  const schema = req.schema;
+  try {
+    const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
+    const picklist = schemaLib.addPicklist(schema, { ...req.body, values: arr(req.body.value) });
+    schemaLib.persist(schema);
+    res.redirect(`/admin/picklists/${picklist.key}/edit?notice=` + encodeURIComponent(`"${picklist.label}" created.`));
+  } catch (err) {
+    res.redirect('/admin/picklists/new?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.get('/picklists/:key/edit', (req, res) => {
+  const picklist = schemaLib.picklistByKey(req.schema, req.params.key);
+  if (!picklist) return res.status(404).send('Unknown picklist.');
+  res.render('admin/picklist-edit', { picklist, entities: req.schema.entities, error: req.query.error, notice: req.query.notice });
+});
+
+router.post('/picklists/:key', (req, res) => {
+  const schema = req.schema;
+  try {
+    const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
+    const submittedValues = arr(req.body.value);
+    const activeFlags = arr(req.body.active); // one 'on'/undefined per submitted value, same order
+    const values = submittedValues.map((v, i) => ({ value: v, active: activeFlags[i] === 'on' }));
+    const picklist = schemaLib.updatePicklist(schema, req.params.key, { ...req.body, values });
+    // updatePicklist preserves prior active flags by matching on value
+    // text — but the form itself is the source of truth for a value the
+    // admin just explicitly toggled, so apply those overrides too.
+    if (picklist.sourceType === 'static') {
+      values.forEach(v => { const real = picklist.values.find(x => x.value === v.value); if (real) real.active = v.active; });
+    }
+    schemaLib.persist(schema);
+    res.redirect('/admin/picklists?notice=' + encodeURIComponent(`"${picklist.label}" saved.`));
+  } catch (err) {
+    res.redirect(`/admin/picklists/${req.params.key}/edit?error=` + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/picklists/:key/delete', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.deletePicklist(schema, req.params.key);
+    schemaLib.persist(schema);
+    res.redirect('/admin/picklists?notice=' + encodeURIComponent('Picklist deleted.'));
+  } catch (err) {
+    res.redirect('/admin/picklists?error=' + encodeURIComponent(err.message));
+  }
+});
+
 router.get('/backup/download', (req, res) => {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   res.setHeader('Content-Type', 'application/zip');
@@ -235,6 +521,23 @@ router.get('/backup/download', (req, res) => {
   if (fs.existsSync(DB_FILE)) archive.file(DB_FILE, { name: 'db.json' });
   if (fs.existsSync(USERS_FILE)) archive.file(USERS_FILE, { name: 'users.json' });
   if (fs.existsSync(UPLOADS_DIR)) archive.directory(UPLOADS_DIR, 'uploads');
+  archive.finalize();
+});
+
+// Schema-only export: just the table/field/view structure, no data, no
+// users, no uploaded files. For the "iterate in dev, push structure to
+// prod, bring real data in separately" workflow — previously the only way
+// to do this was manually deleting every record in dev first so a normal
+// Backup's db.json ended up empty, which worked but was real manual
+// effort every time.
+router.get('/backup/download-schema-only', (req, res) => {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="muneesh-legacy-schema-${stamp}.zip"`);
+  const archive = archiver('zip', { zlib: { level: 6 } });
+  archive.on('error', (err) => { try { res.end(); } catch (e) { /* client gone */ } });
+  archive.pipe(res);
+  if (fs.existsSync(SCHEMA_FILE)) archive.file(SCHEMA_FILE, { name: 'schema.json' });
   archive.finalize();
 });
 
@@ -252,13 +555,26 @@ router.post('/backup/restore', uploadBackupMiddleware, (req, res) => {
     const entries = zip.getEntries();
     const names = entries.map(e => e.entryName);
     if (!names.includes('schema.json')) throw new Error('This ZIP is missing schema.json — it does not look like a Muneesh Legacy backup.');
-    if (!names.includes('db.json')) throw new Error('This ZIP is missing db.json — it does not look like a Muneesh Legacy backup.');
+    // A schema-only export (db.json intentionally omitted) is a valid,
+    // separate kind of restore — it replaces just the table/field/view
+    // structure and leaves existing data, users, and uploads completely
+    // untouched. A full backup (db.json present) still restores
+    // everything together, exactly as before.
+    const isSchemaOnly = !names.includes('db.json');
 
     // Parse the JSON files in-memory to catch corruption before we
     // clobber the running state.
-    let schemaData, dbData, usersData = null;
+    let schemaData, dbData = null, usersData = null;
     try { schemaData = JSON.parse(zip.getEntry('schema.json').getData().toString('utf8')); } catch (e) { throw new Error('schema.json in the backup is not valid JSON.'); }
-    try { dbData = JSON.parse(zip.getEntry('db.json').getData().toString('utf8')); } catch (e) { throw new Error('db.json in the backup is not valid JSON.'); }
+    // Run the uploaded schema through the exact same migration/shape
+    // validation a normal boot applies — catches a structurally broken
+    // schema.json (missing "entities", wrong types) before committing it,
+    // rather than letting a merely-valid-JSON-but-malformed file through
+    // to crash every subsequent request, including this Backup page.
+    try { schemaData = schemaLib.normalizeSchema(schemaData); } catch (e) { throw new Error('This ZIP\'s schema.json isn\'t a valid Muneesh Legacy schema: ' + e.message); }
+    if (!isSchemaOnly) {
+      try { dbData = JSON.parse(zip.getEntry('db.json').getData().toString('utf8')); } catch (e) { throw new Error('db.json in the backup is not valid JSON.'); }
+    }
     if (names.includes('users.json')) {
       try { usersData = JSON.parse(zip.getEntry('users.json').getData().toString('utf8')); } catch (e) { throw new Error('users.json in the backup is not valid JSON.'); }
     }
@@ -268,26 +584,33 @@ router.post('/backup/restore', uploadBackupMiddleware, (req, res) => {
     const bakDir = path.join(DATA_DIR, `.bak-${stamp}`);
     fs.mkdirSync(bakDir, { recursive: true });
     if (fs.existsSync(SCHEMA_FILE)) fs.copyFileSync(SCHEMA_FILE, path.join(bakDir, 'schema.json'));
-    if (fs.existsSync(DB_FILE)) fs.copyFileSync(DB_FILE, path.join(bakDir, 'db.json'));
-    if (fs.existsSync(USERS_FILE)) fs.copyFileSync(USERS_FILE, path.join(bakDir, 'users.json'));
-    if (fs.existsSync(UPLOADS_DIR)) fs.renameSync(UPLOADS_DIR, path.join(bakDir, 'uploads'));
+    if (!isSchemaOnly) {
+      if (fs.existsSync(DB_FILE)) fs.copyFileSync(DB_FILE, path.join(bakDir, 'db.json'));
+      if (fs.existsSync(USERS_FILE)) fs.copyFileSync(USERS_FILE, path.join(bakDir, 'users.json'));
+      if (fs.existsSync(UPLOADS_DIR)) fs.renameSync(UPLOADS_DIR, path.join(bakDir, 'uploads'));
+    }
 
-    // Commit: write the three JSON files, then extract uploads/**.
-    fs.writeFileSync(SCHEMA_FILE, JSON.stringify(schemaData, null, 2));
-    fs.writeFileSync(DB_FILE, JSON.stringify(dbData, null, 2));
-    if (usersData) fs.writeFileSync(USERS_FILE, JSON.stringify(usersData, null, 2));
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-    entries.forEach(entry => {
-      if (!entry.entryName.startsWith('uploads/') || entry.isDirectory) return;
-      // Guard against path traversal in a malicious archive.
-      const relPath = entry.entryName.slice('uploads/'.length);
-      if (relPath.includes('..')) return;
-      const dest = path.join(UPLOADS_DIR, relPath);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, entry.getData());
-    });
+    // Commit: schema.json always gets written. db.json/users.json/uploads
+    // only get touched for a full (non-schema-only) restore.
+    atomicWriteFileSync(SCHEMA_FILE, JSON.stringify(schemaData, null, 2));
+    if (!isSchemaOnly) {
+      atomicWriteFileSync(DB_FILE, JSON.stringify(dbData, null, 2));
+      if (usersData) atomicWriteFileSync(USERS_FILE, JSON.stringify(usersData, null, 2));
+      fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      entries.forEach(entry => {
+        if (!entry.entryName.startsWith('uploads/') || entry.isDirectory) return;
+        // Guard against path traversal in a malicious archive.
+        const relPath = entry.entryName.slice('uploads/'.length);
+        if (relPath.includes('..')) return;
+        const dest = path.join(UPLOADS_DIR, relPath);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, entry.getData());
+      });
+    }
 
-    res.redirect('/admin/backup?notice=' + encodeURIComponent(`Restore complete. Previous state saved to data/.bak-${stamp}/ in case you need to roll back.`));
+    res.redirect('/admin/backup?notice=' + encodeURIComponent(isSchemaOnly
+      ? `Schema restored. Data, users, and uploads were left untouched. Previous schema saved to data/.bak-${stamp}/ in case you need to roll back.`
+      : `Restore complete. Previous state saved to data/.bak-${stamp}/ in case you need to roll back.`));
   } catch (err) {
     res.redirect('/admin/backup?error=' + encodeURIComponent(err.message));
   }
@@ -418,6 +741,35 @@ router.post('/nav/:entity/move', (req, res) => {
   schemaLib.moveNav(schema, req.params.entity, req.body.dir);
   schemaLib.persist(schema);
   res.redirect('/admin');
+});
+
+router.post('/:entity/move-to-admin', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.moveEntityToAdmin(schema, req.params.entity);
+    schemaLib.persist(schema);
+    res.redirect('/admin?notice=' + encodeURIComponent(`"${schema.entities[req.params.entity].label}" moved into Admin.`));
+  } catch (e) {
+    res.redirect('/admin?error=' + encodeURIComponent(e.message));
+  }
+});
+
+router.post('/:entity/move-out-of-admin', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.moveEntityOutOfAdmin(schema, req.params.entity);
+    schemaLib.persist(schema);
+    res.redirect('/admin?notice=' + encodeURIComponent(`"${schema.entities[req.params.entity].label}" moved out of Admin, back to the main nav.`));
+  } catch (e) {
+    res.redirect('/admin?error=' + encodeURIComponent(e.message));
+  }
+});
+
+router.post('/subnav/reorder', (req, res) => {
+  const schema = req.schema;
+  schemaLib.reorderAdminSubnav(schema, req.body && req.body.order);
+  schemaLib.persist(schema);
+  res.status(204).end();
 });
 
 // ---- CSV schema export / data import ---------------------------------
@@ -570,11 +922,17 @@ router.post('/:entity/import', uploadCsvMiddleware, (req, res) => {
 router.get('/:entity/fields', (req, res) => {
   const entity = req.schema.entities[req.params.entity];
   if (!entity) return res.status(404).send('Unknown table.');
-  const fkTargets = Object.values(req.schema.entities).filter(e => e.key !== entity.key);
+  // Lookup fields CAN target their own table (self-referencing fk) — e.g.
+  // a "Group Root" field grouping revisions of the same tenant, or a
+  // "Parent" field for sub-landlords. Nothing in fk resolution, the
+  // formula engine, or db.getById assumes the target is a different
+  // table, so there's no reason to exclude the current one here.
+  const fkTargets = Object.values(req.schema.entities);
   const childOptions = schemaLib.getChildren(req.schema, entity.key).map(c => req.schema.entities[c.entity]);
   res.render('admin/fields', {
     entity, fkTargets, childOptions, allEntities: Object.values(req.schema.entities),
     fieldTypes: schemaLib.FIELD_TYPES, error: req.query.error, notice: req.query.notice,
+    picklists: schemaLib.picklistsFor(req.schema),
   });
 });
 
@@ -602,6 +960,15 @@ router.post('/:entity/fields', (req, res) => {
       rollupField: req.body.rollupField,
       rollupOrderField: req.body.rollupOrderField,
       rollupWhere: req.body.rollupWhere,
+      hint: req.body.hint,
+      hintImportant: req.body.hintImportant === 'on',
+      readOnlyMode: req.body.readOnlyMode,
+      defaultMode: req.body.defaultMode,
+      defaultValue: req.body.defaultValue,
+      defaultFormula: req.body.defaultFormula,
+      picklistSource: req.body.picklistSource,
+      picklistKey: req.body.picklistKey,
+      picklistConstraintField: req.body.picklistConstraintField,
     });
     schemaLib.persist(schema);
     res.redirect(`/admin/${req.params.entity}/fields?notice=${encodeURIComponent('Field added.')}`);
@@ -633,6 +1000,15 @@ router.post('/:entity/fields/:field', (req, res) => {
       rollupField: req.body.rollupField,
       rollupOrderField: req.body.rollupOrderField,
       rollupWhere: req.body.rollupWhere,
+      hint: req.body.hint,
+      hintImportant: req.body.hintImportant === 'on',
+      readOnlyMode: req.body.readOnlyMode,
+      defaultMode: req.body.defaultMode,
+      defaultValue: req.body.defaultValue,
+      defaultFormula: req.body.defaultFormula,
+      picklistSource: req.body.picklistSource,
+      picklistKey: req.body.picklistKey,
+      picklistConstraintField: req.body.picklistConstraintField,
     });
     schemaLib.persist(schema);
     res.redirect(`/admin/${req.params.entity}/fields?notice=${encodeURIComponent('Field updated.')}`);
@@ -715,7 +1091,7 @@ router.get('/:entity/views', (req, res) => {
 
 router.post('/:entity/views/applets/add', (req, res) => {
   const schema = req.schema;
-  schemaLib.addApplet(schema, req.params.entity, req.body.baseKey);
+  schemaLib.addChildAppletInstance(schema, req.params.entity, req.body.baseKey);
   schemaLib.persist(schema);
   res.redirect(`/admin/${req.params.entity}/views`);
 });

@@ -1,0 +1,89 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'composedViews' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= view ? 'Edit View: ' + view.label : 'New View' %></span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/composed-views">&larr; Back to Views</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <% var rows = (view ? view.applets : []).map(function(a){
+       var posOf = function(instKey){ var idx = (view.applets||[]).findIndex(function(x){ return x.instanceKey === instKey; }); return idx === -1 ? '' : String(idx + 1); };
+       return { appletKey: a.appletKey, parentPosition: a.parentInstanceKey ? posOf(a.parentInstanceKey) : '', linkField: a.linkField };
+     }).concat([{},{},{}]); %>
+
+  <form class="detail-form" method="POST" action="<%= view ? '/admin/composed-views/' + view.key : '/admin/composed-views' %>">
+    <div class="field-grid">
+      <div class="field-row">
+        <label class="field-label">View Name *</label>
+        <div class="field-value"><input type="text" name="label" value="<%= view ? view.label : '' %>" required></div>
+      </div>
+    </div>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Applets in this View</span></div>
+    <p class="admin-help">
+      Each row is one Applet instance in this view, shown top to bottom in the order listed here.
+      To make one a master-detail child, set its <strong>Parent Row</strong> to the row number of the applet
+      above it that should control it, and set <strong>Link Field</strong> to the field (on the child applet's
+      own table) that should match whatever record is selected in that parent row.
+    </p>
+    <p class="admin-help">
+      <strong>No drag-to-reorder here, deliberately</strong> &mdash; Parent Row references are by row number, so
+      reordering could silently change what an existing Parent Row reference points at. If you delete a row,
+      double-check any Parent Row numbers below it still point where you intend.
+    </p>
+    <table class="list-table">
+      <thead><tr><th>Applet *</th><th>Parent Row <span class="admin-hint">(optional)</span></th><th>Link Field <span class="admin-hint">(required if Parent Row is set)</span></th><th></th></tr></thead>
+      <tbody id="viewAppletsBody">
+        <% rows.forEach(function(r, i){ %>
+        <tr>
+          <td>
+            <strong class="row-number">Row <%= i + 1 %>.</strong>
+            <select name="applet_key[]">
+              <option value="">&mdash; applet &mdash;</option>
+              <% applets.forEach(function(a){ %>
+                <option value="<%= a.key %>" <%= r.appletKey === a.key ? 'selected' : '' %>><%= a.label %> (<%= a.baseTable %>)</option>
+              <% }); %>
+            </select>
+          </td>
+          <td>
+            <select name="parent_position[]">
+              <option value="">&mdash; none (top-level) &mdash;</option>
+              <% for (var p = 1; p <= 10; p++) { %>
+                <option value="<%= p %>" <%= String(r.parentPosition) === String(p) ? 'selected' : '' %>>Row <%= p %></option>
+              <% } %>
+            </select>
+          </td>
+          <td><input type="text" name="link_field[]" value="<%= r.linkField || '' %>" style="width:100%" placeholder="e.g. LL_GroupRoot"></td>
+          <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this); renumberViewRows();" title="Remove this row">&times;</button></td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('viewAppletsBody'); renumberViewRows();">+ Add Row</button></p>
+
+    <div class="form-actions"><button class="btn btn-primary" type="submit"><%= view ? 'Save View' : 'Create View' %></button></div>
+  </form>
+</div>
+
+<script>
+  // The "Row N." label is just a display aid — the server determines
+  // actual position from array order at submit time regardless — but it
+  // still needs to stay accurate after mlAddReportRow/mlRemoveReportRow
+  // add or remove rows, since those functions are generic (shared with
+  // Report Columns etc.) and know nothing about this page's row-number
+  // labels specifically.
+  function renumberViewRows() {
+    document.querySelectorAll('#viewAppletsBody .row-number').forEach(function (el, i) {
+      el.textContent = 'Row ' + (i + 1) + '.';
+    });
+  }
+</script>
+
+<%- include('../partials/foot') %>

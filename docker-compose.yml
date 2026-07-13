@@ -7,6 +7,14 @@ services:
     volumes:
       - muneesh-legacy-data:/app/data
     restart: unless-stopped
+    environment:
+      # Set a real value in a ".env" file next to this compose file (a
+      # line like SESSION_SECRET=<random string>, e.g. from
+      # `openssl rand -hex 32`) — this is what actually signs/verifies
+      # session cookies. Without it, the app falls back to a hardcoded
+      # development secret and prints a loud warning on startup; that
+      # fallback should never be relied on for anything real.
+      - SESSION_SECRET=${SESSION_SECRET:-}
 
 volumes:
   muneesh-legacy-data:

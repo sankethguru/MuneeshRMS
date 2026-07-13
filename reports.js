@@ -34,6 +34,19 @@ function forbidReport(res, def) {
   });
 }
 
+// Express's query parser (qs) turns a repeated query key into an array
+// rather than a string (e.g. ?tenant=A&tenant=B -> ['A','B']) — this
+// shouldn't normally happen since validateReportDef now rejects duplicate
+// parameter keys at save time, but a stale report saved before that check
+// existed, a hand-edited URL, or any other unexpected shape should degrade
+// gracefully rather than crash the whole page. Takes the first value if
+// given an array; coerces anything else to a string defensively.
+function asQueryString(v) {
+  if (Array.isArray(v)) v = v[0];
+  if (v === undefined || v === null) return '';
+  return String(v).trim();
+}
+
 // Parses the parameter values a report's own form submits (query string)
 // into the shape runReport() expects: a plain string for exact-kind
 // parameters, or {from, to} for range-kind ones.
@@ -41,9 +54,9 @@ function parseParamValues(def, query) {
   const values = {};
   (def.parameters || []).forEach(p => {
     if (p.kind === 'date-range' || p.kind === 'number-range') {
-      values[p.key] = { from: (query[`${p.key}_from`] || '').trim(), to: (query[`${p.key}_to`] || '').trim() };
+      values[p.key] = { from: asQueryString(query[`${p.key}_from`]), to: asQueryString(query[`${p.key}_to`]) };
     } else {
-      values[p.key] = (query[p.key] || '').trim();
+      values[p.key] = asQueryString(query[p.key]);
     }
   });
   return values;

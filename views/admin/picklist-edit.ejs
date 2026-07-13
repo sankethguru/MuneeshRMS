@@ -1,0 +1,120 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'picklists' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= picklist ? 'Edit Picklist: ' + picklist.label : 'New Picklist' %></span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/picklists">&larr; Back to Picklists</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <% var sourceTableEntity = picklist && picklist.sourceType === 'table' ? entities[picklist.sourceTable] : null; %>
+  <% var sourceFields = sourceTableEntity ? sourceTableEntity.fields.filter(function(f){ return f.type !== 'spacer' && f.type !== 'section'; }) : []; %>
+  <% var rows = (picklist && picklist.sourceType === 'static' ? picklist.values : []).concat([{},{},{}]); %>
+
+  <form class="detail-form" method="POST" action="<%= picklist ? '/admin/picklists/' + picklist.key : '/admin/picklists' %>">
+    <div class="field-grid">
+      <div class="field-row">
+        <label class="field-label">Picklist Name *</label>
+        <div class="field-value"><input type="text" name="label" value="<%= picklist ? picklist.label : '' %>" required></div>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Source *</label>
+        <div class="field-value">
+          <select name="sourceType" <%= picklist ? 'disabled' : '' %>>
+            <option value="static" <%= !picklist || picklist.sourceType === 'static' ? 'selected' : '' %>>Static (type your own values)</option>
+            <option value="table" <%= picklist && picklist.sourceType === 'table' ? 'selected' : '' %>>Table (sourced from another table's field)</option>
+          </select>
+          <% if (picklist) { %>
+            <input type="hidden" name="sourceType" value="<%= picklist.sourceType %>">
+            <p class="admin-hint">Source can't change after creation. Make a new picklist instead.</p>
+          <% } %>
+        </div>
+      </div>
+      <% if (!picklist) { %>
+        <div class="field-row" id="newSourceTableRow" style="display:none">
+          <label class="field-label">Source Table</label>
+          <div class="field-value">
+            <select name="sourceTable">
+              <option value="">&mdash; choose a table &mdash;</option>
+              <% Object.values(entities).forEach(function(e){ %><option value="<%= e.key %>"><%= e.label %></option><% }); %>
+            </select>
+          </div>
+        </div>
+      <% } %>
+    </div>
+
+    <% if (!picklist) { %>
+      <p class="admin-help">Save this first, then come back to set up values (static) or the source/constraint fields (table) &mdash; those need this picklist's shape to already be fixed.</p>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">Create Picklist</button></div>
+    <% } else if (picklist.sourceType === 'static') { %>
+      <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Values</span></div>
+      <p class="admin-help">Uncheck Active to retire a value without deleting it &mdash; existing records that already used it keep showing it, but it won't be offered as a new choice.</p>
+      <table class="list-table">
+        <thead><tr><th>Value</th><th>Active</th><th></th></tr></thead>
+        <tbody id="valuesBody">
+          <% rows.forEach(function(v){ %>
+          <tr>
+            <td><input type="text" name="value[]" value="<%= v.value || '' %>" style="width:220px"></td>
+            <td><input type="checkbox" name="active[]" value="on" <%= v.active !== false ? 'checked' : '' %>></td>
+            <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)" title="Remove this row">&times;</button></td>
+          </tr>
+          <% }); %>
+        </tbody>
+      </table>
+      <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('valuesBody')">+ Add Row</button></p>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">Save Picklist</button></div>
+    <% } else { %>
+      <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Table Source</span></div>
+      <div class="field-grid">
+        <div class="field-row">
+          <label class="field-label">Source Table</label>
+          <div class="field-value"><code><%= sourceTableEntity ? sourceTableEntity.label : picklist.sourceTable %></code>
+            <input type="hidden" name="sourceTable" value="<%= picklist.sourceTable %>">
+          </div>
+        </div>
+        <div class="field-row">
+          <label class="field-label">Value Field *</label>
+          <div class="field-value">
+            <select name="sourceValueField" required>
+              <option value="">&mdash; field &mdash;</option>
+              <% sourceFields.forEach(function(f){ %>
+                <option value="<%= f.name %>" <%= picklist.sourceValueField === f.name ? 'selected' : '' %>><%= f.label %> (<%= f.name %>)</option>
+              <% }); %>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <label class="field-label">Constraint Field <span class="admin-hint">(optional)</span></label>
+          <div class="field-value">
+            <select name="sourceConstraintField">
+              <option value="">&mdash; none &mdash;</option>
+              <% sourceFields.forEach(function(f){ %>
+                <option value="<%= f.name %>" <%= picklist.sourceConstraintField === f.name ? 'selected' : '' %>><%= f.label %> (<%= f.name %>)</option>
+              <% }); %>
+            </select>
+            <p class="admin-hint">If set, a field using this picklist can be configured to narrow its options to only rows where this field matches a field on the record being edited (e.g. only cards where <%= sourceTableEntity ? sourceTableEntity.label : 'this' %>'s Account Type matches the current record's own Account Type).</p>
+          </div>
+        </div>
+      </div>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">Save Picklist</button></div>
+    <% } %>
+  </form>
+</div>
+
+<script>
+  var newSourceTypeSelect = document.querySelector('select[name="sourceType"]:not([disabled])');
+  if (newSourceTypeSelect) {
+    newSourceTypeSelect.addEventListener('change', function() {
+      var row = document.getElementById('newSourceTableRow');
+      if (row) row.style.display = this.value === 'table' ? '' : 'none';
+    });
+  }
+</script>
+
+<%- include('../partials/foot') %>

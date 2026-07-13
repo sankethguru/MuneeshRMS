@@ -17,7 +17,7 @@
   <form class="detail-form" method="POST" action="<%= isEdit ? '/admin/users/' + user.id : '/admin/users' %>">
     <div class="field-grid">
       <div class="field-row"><label class="field-label">Username *</label><div class="field-value"><input type="text" name="username" value="<%= isEdit ? user.username : '' %>" required></div></div>
-      <div class="field-row"><label class="field-label"><%= isEdit ? 'New Password' : 'Password *' %></label><div class="field-value"><input type="password" name="password" minlength="4" <%= isEdit ? '' : 'required' %> placeholder="<%= isEdit ? 'leave blank to keep current password' : '' %>"></div></div>
+      <div class="field-row"><label class="field-label"><%= isEdit ? 'New Password' : 'Password *' %></label><div class="field-value"><input type="password" name="password" minlength="8" <%= isEdit ? '' : 'required' %> placeholder="<%= isEdit ? 'leave blank to keep current password' : '' %>"></div></div>
       <div class="field-row"><label class="field-label">Administrator</label><div class="field-value">
         <input type="checkbox" id="isAdminChk" name="isAdmin" onchange="document.getElementById('permMatrix').style.opacity = this.checked ? '0.4' : '1'" <%= (isEdit && user.isAdmin) ? 'checked' : '' %>>
         <span class="admin-hint">full access to every table and the Admin section; overrides the checkboxes below</span>

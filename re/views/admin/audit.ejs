@@ -1,0 +1,48 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'audit' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Audit Log</span>
+    <div class="applet-toolbar"><a class="btn btn-toolbar" href="/admin">&larr; Back to Admin</a></div>
+  </div>
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Time</th><th>Table</th><th>Record</th><th>Action</th><th>User</th><th>Changes</th></tr></thead>
+      <tbody>
+        <% if (entries.length === 0) { %>
+          <tr><td colspan="6" class="empty-row">No audited activity yet. Enable Audit Trail on a table under its Settings.</td></tr>
+        <% } %>
+        <% entries.forEach(function(e, i){ var ent = entities[e.entity]; %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td class="nowrap"><%
+            /* audit ts looks like 2026-07-04T14:03:22.123Z — reformat to DD-MM-YYYY HH:MM:SS */
+            var ds = e.ts.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+          %><%= ds ? (ds[3] + '-' + ds[2] + '-' + ds[1] + ' ' + ds[4] + ':' + ds[5] + ':' + ds[6]) : e.ts.replace('T', ' ').slice(0, 19) %></td>
+          <td><%= ent ? ent.label : e.entity %></td>
+          <td><code><%= e.recordId %></code></td>
+          <td>
+            <% if (e.action === 'create') { %><span class="bool-flag bool-yes">NEW</span>
+            <% } else if (e.action === 'delete') { %><span class="bool-flag" style="background:#f4e3e3;color:#7c2222;border:1px solid #d2a5a5;">DEL</span>
+            <% } else { %><span class="bool-flag" style="background:#e3edf7;color:#1a4a8a;border:1px solid #a9c5e6;">UPD</span><% } %>
+          </td>
+          <td><%= e.user %></td>
+          <td>
+            <% if (e.changes && e.changes.length) { %>
+              <% e.changes.slice(0, 4).forEach(function(c){ %>
+                <div class="audit-change"><strong><%= c.field %>:</strong> <span class="audit-before"><%= c.before %></span> &rarr; <span class="audit-after"><%= c.after %></span></div>
+              <% }); %>
+              <% if (e.changes.length > 4) { %><div class="admin-hint"><%= e.changes.length - 4 %> more field(s) changed&hellip;</div><% } %>
+            <% } else { %>
+              <span class="admin-hint">&mdash;</span>
+            <% } %>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

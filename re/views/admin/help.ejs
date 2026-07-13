@@ -1,0 +1,143 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'help' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Formula Language Reference</span>
+  </div>
+
+  <div style="padding: 16px 20px;">
+
+    <p class="admin-help">
+      This is the same expression language used everywhere a formula is accepted: <strong>formula</strong> fields,
+      <strong>rollup</strong> WHERE clauses, and <strong>Report</strong> columns/conditions/group-by/aggregates.
+      Examples below use a fictional <code>orders</code> / <code>customers</code> pair of tables &mdash; not any
+      table actually in this installation &mdash; so they read as reference material rather than implying these
+      exact names are special.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Referencing Fields</span></div>
+    <table class="list-table">
+      <thead><tr><th style="width:220px">Syntax</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>ORD_Amount</code></td><td>A bare field name on the table the formula lives on.</td></tr>
+        <tr class="row-odd"><td><code>customers.CUST_Name</code></td><td>Follows a foreign-key field from this table to <code>customers</code>, then reads <code>CUST_Name</code> there. Works when the table name (<code>customers</code>) matches the fk's target table.</td></tr>
+        <tr class="row-even"><td><code>ORD_Customer.CUST_Name</code></td><td>Same cross-table lookup, but naming the fk <em>field</em> (<code>ORD_Customer</code>) instead of its target table. Useful if a table has more than one fk pointing at the same target and you need to say which one.</td></tr>
+        <tr class="row-odd"><td><code>parent.CUST_CreditLimit</code></td><td>Inside a rollup's WHERE clause only &mdash; refers back to the record the rollup itself lives on (see Rollup WHERE below).</td></tr>
+      </tbody>
+    </table>
+    <p class="admin-help">A typo in either the table/fk name or the field name fails loudly &mdash; e.g. <code>#REF: no such field "CUST_Nam" on customers</code> &mdash; rather than silently returning blank.</p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Logic</span></div>
+    <table class="list-table">
+      <thead><tr><th style="width:220px">Function</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr class="row-even">
+          <td><code>IF(cond, a, b)</code></td>
+          <td><code>IF(ORD_Amount &gt; 10000, "Large Order", "Standard")</code></td>
+          <td>Write <code>=</code> for equality (e.g. <code>ORD_Status = "Paid"</code>) &mdash; it's converted to strict equality automatically. Infix <code>AND</code> / <code>OR</code> / <code>NOT</code> work as keywords.</td>
+        </tr>
+        <tr class="row-odd">
+          <td><code>IFERROR(val, fallback)</code></td>
+          <td><code>IFERROR(ORD_Amount / ORD_ItemCount, 0)</code></td>
+          <td>Catches <code>#ERR</code> (or a NaN result, e.g. from dividing by a blank) and substitutes <code>fallback</code> instead.</td>
+        </tr>
+        <tr class="row-even">
+          <td><code>ISBLANK(v)</code></td>
+          <td><code>IF(ISBLANK(ORD_Notes), "No notes", ORD_Notes)</code></td>
+          <td>True for an empty string, <code>undefined</code>, or <code>null</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Math</span></div>
+    <table class="list-table">
+      <thead><tr><th style="width:220px">Function</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>ROUND(n, d)</code></td><td><code>ROUND(ORD_Amount * 0.18, 2)</code></td><td>Rounds to <code>d</code> decimal places, standard rounding.</td></tr>
+        <tr class="row-odd"><td><code>ROUNDUP(n, d)</code></td><td><code>ROUNDUP(ORD_Amount / 3, 0)</code></td><td>Always rounds away from zero.</td></tr>
+        <tr class="row-even"><td><code>ROUNDDOWN(n, d)</code></td><td><code>ROUNDDOWN(ORD_Amount / 3, 0)</code></td><td>Always rounds toward zero (truncates).</td></tr>
+        <tr class="row-odd"><td><code>ABS(n)</code></td><td><code>ABS(ORD_Amount - 5000)</code></td><td>Absolute value.</td></tr>
+        <tr class="row-even"><td><code>MIN(...)</code> / <code>MAX(...)</code></td><td><code>MIN(ORD_Amount, 10000)</code></td><td>Takes any number of arguments directly &mdash; not a cell range.</td></tr>
+        <tr class="row-odd"><td><code>SUM(...)</code></td><td><code>SUM(ORD_Amount, 500, 250)</code></td><td>Also a direct-arguments sum, for adding a field plus flat extras in one expression. (Aggregating a whole related table is what <strong>rollup</strong> fields and Report aggregates are for — see below.)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Dates</span></div>
+    <table class="list-table">
+      <thead><tr><th style="width:220px">Function</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>TODAY()</code></td><td><code>IF(ORD_Date = TODAY(), "Placed Today", "Earlier")</code></td><td>Returns today's date as an ISO string.</td></tr>
+        <tr class="row-odd"><td><code>YEAR(d)</code> / <code>MONTH(d)</code> / <code>DAY(d)</code></td><td><code>CONCAT(YEAR(ORD_Date), "-", MONTH(ORD_Date))</code></td><td><code>MONTH</code> is 1&ndash;12, not 0-based.</td></tr>
+        <tr class="row-even"><td><code>DAYS(d1, d2)</code></td><td><code>DAYS(TODAY(), ORD_Date)</code></td><td>Whole days between two dates (<code>d1 - d2</code>).</td></tr>
+        <tr class="row-odd"><td><code>FY(date)</code></td><td><code>FY(ORD_Date)</code> &rarr; <code>"2025-26"</code></td><td>Indian financial year label (April&ndash;March). Also accepts a literal FY string directly, e.g. <code>FY("2025-26")</code>, for comparing against a fixed year.</td></tr>
+        <tr class="row-even"><td><code>CURRENT_FY()</code></td><td><code>IF(FY(ORD_Date) = CURRENT_FY(), "This year", "Past")</code></td><td>Today's financial year.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Text</span></div>
+    <table class="list-table">
+      <thead><tr><th style="width:220px">Function</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>CONCAT(...)</code></td><td><code>CONCAT(customers.CUST_Name, " - ", ORD_Number)</code></td><td>Joins any number of values into one string.</td></tr>
+        <tr class="row-odd"><td><code>LEFT(s, n)</code> / <code>RIGHT(s, n)</code></td><td><code>LEFT(ORD_Number, 3)</code></td><td>First/last <code>n</code> characters.</td></tr>
+        <tr class="row-even"><td><code>MID(s, start, len)</code></td><td><code>MID(ORD_Number, 4, 2)</code></td><td><code>start</code> is 1-based, like Excel.</td></tr>
+        <tr class="row-odd"><td><code>LEN(s)</code></td><td><code>IF(LEN(ORD_Notes) &gt; 100, "Long note", "")</code></td><td>Character count.</td></tr>
+        <tr class="row-even"><td><code>UPPER(s)</code> / <code>LOWER(s)</code> / <code>TRIM(s)</code></td><td><code>UPPER(customers.CUST_City)</code></td><td>Case conversion and whitespace trimming.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">LOOKUP</span></div>
+    <p class="admin-help">
+      <code>LOOKUP("table", "condition", "returnField")</code> scans every row of the named table, evaluates
+      <code>condition</code> against each one, and returns <code>returnField</code> from the single matching row.
+      Unlike a plain cross-table reference (which needs a real fk field), LOOKUP works even when there's
+      <em>no</em> direct link — e.g. matching an order's year against a separate rates table:
+    </p>
+    <p class="admin-help" style="font-family:monospace; background:#f7f6f0; padding:8px 10px; border:1px solid var(--border-dark);">
+      LOOKUP("tax_rates", "tax_rates.RATE_Year = YEAR(ORD_Date)", "RATE_Percent")
+    </p>
+    <p class="admin-help">
+      Inside the condition, the target table's own fields are reached as <code>tax_rates.FieldName</code> (same
+      dotted syntax as everywhere else); this formula's own fields are reached by bare name, same as normal.
+      Errors visibly rather than guessing: <code>#LOOKUP: no match</code>, <code>#LOOKUP: ambiguous (n rows)</code>
+      if more than one row matches, or <code>#REF: no such field "X" on tax_rates</code> if a name in the condition
+      or the return field is misspelled.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Rollup WHERE</span></div>
+    <p class="admin-help">
+      A rollup field aggregates a related table (one or two hops away) with <code>SUM/COUNT/AVG/MIN/MAX</code>
+      and an optional WHERE condition, using the same formula language — bare names refer to the row being
+      aggregated, and <code>parent.FieldName</code> refers back to the record the rollup itself lives on:
+    </p>
+    <p class="admin-help" style="font-family:monospace; background:#f7f6f0; padding:8px 10px; border:1px solid var(--border-dark);">
+      FY(ORD_Date) = CURRENT_FY() AND ORD_Amount &gt; parent.CUST_CreditLimit
+    </p>
+    <p class="admin-help">On a Customers table, a rollup with this WHERE (aggregating the related Orders) would sum only this financial year's orders that exceed that specific customer's own credit limit.</p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Blank Fields in Arithmetic</span></div>
+    <p class="admin-help">
+      A blank <strong>number/currency/percent</strong> field behaves as <code>0</code> in <code>+ - * /</code>
+      expressions — the standard spreadsheet convention, so <code>ORD_Amount + ORD_Discount</code> still adds up
+      correctly even if <code>ORD_Discount</code> is empty on some records. This is scoped narrowly on purpose:
+      a blank <strong>text</strong> field used in <code>CONCAT</code> or displayed directly still stays blank,
+      never becomes the string <code>"0"</code>.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Errors</span></div>
+    <table class="list-table">
+      <thead><tr><th style="width:220px">Error</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>#ERR</code></td><td>Something in the expression itself failed (e.g. a genuinely broken formula) that isn't one of the more specific errors below.</td></tr>
+        <tr class="row-odd"><td><code>#REF: no such field "X" on table</code></td><td>A field name referenced (directly, via a cross-table dot, or inside a LOOKUP condition) doesn't exist — usually a typo or case mismatch.</td></tr>
+        <tr class="row-even"><td><code>#LOOKUP: no match</code></td><td>A LOOKUP's condition matched zero rows in the target table.</td></tr>
+        <tr class="row-odd"><td><code>#LOOKUP: ambiguous (n rows)</code></td><td>A LOOKUP's condition matched more than one row — it needs to match exactly one.</td></tr>
+      </tbody>
+    </table>
+
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

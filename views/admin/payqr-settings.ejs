@@ -10,6 +10,62 @@
   <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
   <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
 
+  <p class="admin-help">
+    <strong>PayQR only works with tables named exactly <code>payees</code> and <code>payments</code></strong> &mdash;
+    this isn't configurable. If those tables are ever deleted or you're setting PayQR up on a fresh install,
+    follow the guide below to recreate them field-by-field.
+  </p>
+
+  <details <%= (!payeesEntity || !paymentsEntity) ? 'open' : '' %> style="margin: 0 0 16px 0; border: 1px solid var(--border-dark); background: #fafaf6; padding: 10px 14px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--navy-2);">How to recreate the Payees and Payments tables from scratch</summary>
+    <div style="padding-top: 10px; font-size: 13px; line-height: 1.6;">
+      <p class="admin-help">
+        Build in this order &mdash; Payments needs Payees to already exist (its Payee field links to it), and the two
+        rollup fields on Payees need Payments to already exist (they pull data from it). Skipping the order means
+        a field you need won't be offered yet. <strong>The field names below are suggestions, not requirements</strong>
+        &mdash; what actually matters is each field's <em>type</em> and this build order; whatever names you actually
+        use, you'll map them to the correct role using the settings form further down this page.
+      </p>
+
+      <p><strong>Step 1 &mdash; Create the table "Payees"</strong> (Admin &rarr; Tables &rarr; New Table), then add these fields, in order:</p>
+      <table class="list-table" style="margin-bottom:12px;">
+        <thead><tr><th>Field Name</th><th>Label</th><th>Type</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr class="row-even"><td><code>PAY_Name</code></td><td>Payee Name</td><td>Text</td><td>Primary Key, Required</td></tr>
+          <tr class="row-odd"><td><code>PAY_Method</code></td><td>Payment Method</td><td>Picklist</td><td>Options: <code>UPI ID, Bank Account</code> &mdash; Required</td></tr>
+          <tr class="row-even"><td><code>PAY_UPI_ID</code></td><td>UPI ID</td><td>Text</td><td></td></tr>
+          <tr class="row-odd"><td><code>PAY_AccountNum</code></td><td>Account Number</td><td>Text</td><td></td></tr>
+          <tr class="row-even"><td><code>PAY_IFSC</code></td><td>IFSC</td><td>Text</td><td></td></tr>
+          <tr class="row-odd"><td><code>PAY_NarrationTemplate</code></td><td>Narration Template</td><td>Text</td><td>Can include <code>{{PREV_MONTH}}</code>, e.g. "Ambika Salary - {{PREV_MONTH}}"</td></tr>
+        </tbody>
+      </table>
+
+      <p><strong>Step 2 &mdash; Create the table "Payments"</strong>, then add these fields, in order:</p>
+      <table class="list-table" style="margin-bottom:12px;">
+        <thead><tr><th>Field Name</th><th>Label</th><th>Type</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr class="row-even"><td><code>PMT_ID</code></td><td>Payment ID</td><td>Number</td><td>Primary Key, Required, Auto-numbered</td></tr>
+          <tr class="row-odd"><td><code>PMT_Date</code></td><td>Date</td><td>Date</td><td>Required</td></tr>
+          <tr class="row-even"><td><code>PMT_Payee</code></td><td>Payee</td><td>Lookup (fk)</td><td>Links to: <strong>Payees</strong> &mdash; Required</td></tr>
+          <tr class="row-odd"><td><code>PMT_Amount</code></td><td>Amount</td><td>Currency</td><td>Required</td></tr>
+          <tr class="row-even"><td><code>PMT_Notes</code></td><td>Notes</td><td>Textarea</td><td>2 rows</td></tr>
+          <tr class="row-odd"><td><code>PMT_Month</code></td><td>Month</td><td>Formula</td><td>Format: none/plain &mdash; Formula: <code>CONCAT(YEAR(PMT_Date), "-", MONTH(PMT_Date))</code></td></tr>
+        </tbody>
+      </table>
+
+      <p><strong>Step 3 &mdash; Go back to "Payees"</strong> and add these two rollup fields (only possible now that Payments exists):</p>
+      <table class="list-table">
+        <thead><tr><th>Field Name</th><th>Label</th><th>Type</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr class="row-even"><td><code>PAY_LastPaidAmount</code></td><td>Last Paid Amount</td><td>Rollup</td><td>Format: Currency &mdash; Function: LATEST &mdash; Table: Payments &mdash; Rollup Field: <code>PMT_Amount</code> &mdash; Order Field: <code>PMT_Date</code></td></tr>
+          <tr class="row-odd"><td><code>PAY_LastPaidDate</code></td><td>Last Paid Date</td><td>Rollup</td><td>Format: Date &mdash; Function: LATEST &mdash; Table: Payments &mdash; Rollup Field: <code>PMT_Date</code> &mdash; Order Field: <code>PMT_Date</code></td></tr>
+        </tbody>
+      </table>
+
+      <p class="admin-help" style="margin-top:10px;">Once both tables exist with these fields, come back to this page to map the field roles below. Any extra fields you add beyond these (e.g. an "Active" flag on Payees) are entirely fine &mdash; PayQR only reads the roles you explicitly map, it ignores everything else on both tables.</p>
+    </div>
+  </details>
+
   <% if (!payeesEntity || !paymentsEntity) { %>
     <div class="format-warning">
       <span class="warn-icon">&#9888;</span>
@@ -17,7 +73,7 @@
         PayQR needs both a <code>payees</code> and a <code>payments</code> table to exist.
         <% if (!payeesEntity) { %>The <strong>Payees</strong> table wasn't found.<% } %>
         <% if (!paymentsEntity) { %>The <strong>Payments</strong> table wasn't found.<% } %>
-        If you're on an install that predates PayQR, see <code>migrate-payqr.js</code> in the app folder.
+        Follow the guide above to recreate them.
       </span>
     </div>
   <% } else { %>

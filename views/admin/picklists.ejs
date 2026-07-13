@@ -1,0 +1,54 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'picklists' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Picklists</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/picklists/new">+ New Picklist</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <p class="admin-help">
+    A Picklist is a reusable value list, defined once here and usable on any number of picklist-type fields
+    across any tables — matching Siebel's "List of Values". Two shapes: a plain list you type yourself, or one
+    sourced live from another table's field (e.g. every credit card name in Banking) — optionally narrowed by a
+    field on the record being edited (e.g. only that record's own Account Type's cards).
+  </p>
+
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Picklist</th><th>Source</th><th>Values / Detail</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% if (picklists.length === 0) { %>
+          <tr><td colspan="4" class="empty-row">No picklists yet &mdash; click "+ New Picklist" to build one.</td></tr>
+        <% } %>
+        <% picklists.forEach(function(p, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><strong><%= p.label %></strong></td>
+          <td><%= p.sourceType === 'table' ? 'Table' : 'Static' %></td>
+          <td>
+            <% if (p.sourceType === 'table') { %>
+              <code><%= p.sourceTable %>.<%= p.sourceValueField %></code><% if (p.sourceConstraintField) { %> <span class="admin-hint">(constrainable by <%= p.sourceConstraintField %>)</span><% } %>
+            <% } else { %>
+              <%= (p.values || []).filter(function(v){ return v.active; }).length %> active of <%= (p.values || []).length %> total
+            <% } %>
+          </td>
+          <td class="nowrap">
+            <a class="btn btn-mini" href="/admin/picklists/<%= p.key %>/edit">Edit</a>
+            <form method="POST" action="/admin/picklists/<%= p.key %>/delete" style="display:inline" onsubmit="return confirm('Delete this picklist? This cannot be undone.');">
+              <button class="btn btn-mini btn-danger" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

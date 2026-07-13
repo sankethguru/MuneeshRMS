@@ -117,6 +117,45 @@
     </p>
     <p class="admin-help">On a Customers table, a rollup with this WHERE (aggregating the related Orders) would sum only this financial year's orders that exceed that specific customer's own credit limit.</p>
 
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Series Fields (Auto-Numbering)</span></div>
+    <p class="admin-help">
+      A <strong>series</strong> field auto-assigns a number when a record is created &mdash; but instead of one
+      global counter for the whole table, it resets per <em>group</em> (e.g. a separate running sequence per
+      customer, per year, per region &mdash; whatever the group path resolves to). Three things need to be set up:
+    </p>
+    <table class="list-table">
+      <thead><tr><th style="width:220px">Setting</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr class="row-even">
+          <td>Group Path</td>
+          <td><code>ORD_Customer.CUST_Region</code></td>
+          <td>
+            Always exactly one hop: an fk field on this table (<code>ORD_Customer</code>), then a field on
+            whatever it points to (<code>CUST_Region</code>). The <em>value</em> of that field becomes the group
+            key &mdash; it doesn't have to be a plain text field. In this example, grouping is really "by region,"
+            even though Orders only links directly to Customers, because each customer's own <code>CUST_Region</code>
+            field already holds the region's identifier.
+          </td>
+        </tr>
+        <tr class="row-odd">
+          <td>Tracker Table</td>
+          <td><code>order_series</code></td>
+          <td>A separate table that holds one row per group, remembering the last number issued for that group.</td>
+        </tr>
+        <tr class="row-even">
+          <td>Tracker Group / Counter Fields</td>
+          <td><code>OS_Region</code> / <code>OS_LastNumber</code></td>
+          <td>Which field on the tracker table stores the group key, and which one stores the running count.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="admin-help">
+      With the setup above, four orders alternating between a NORTH-region customer and a SOUTH-region customer
+      number themselves <strong>1, 1, 2, 2</strong> &mdash; not 1, 2, 3, 4 &mdash; because each region keeps its
+      own independent count. The tracker table's rows are created automatically the first time a new group is
+      seen; nothing needs to be pre-populated.
+    </p>
+
     <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Blank Fields in Arithmetic</span></div>
     <p class="admin-help">
       A blank <strong>number/currency/percent</strong> field behaves as <code>0</code> in <code>+ - * /</code>

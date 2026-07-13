@@ -1,0 +1,51 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'composedViews' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Views</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/composed-views/new">+ New View</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <p class="admin-help">
+    A View arranges one or more <a href="/admin/applets">Applets</a> together on one page — including, for a
+    master-detail arrangement, a child applet that reacts to whichever row is selected in a parent applet
+    above it. Collections of Views form a <a href="/admin/screens">Screen</a>, same idea as today's nav tabs.
+  </p>
+
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>View</th><th>Applets</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% if (views.length === 0) { %>
+          <tr><td colspan="3" class="empty-row">No views yet &mdash; click "+ New View" to build one.</td></tr>
+        <% } %>
+        <% views.forEach(function(v, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><strong><%= v.label %></strong></td>
+          <td>
+            <% (v.applets || []).forEach(function(a, j){ %>
+              <% var applet = applets.find(function(ap){ return ap.key === a.appletKey; }); %>
+              <%= j > 0 ? ', ' : '' %><%= applet ? applet.label : a.appletKey %><% if (a.parentInstanceKey) { %> <span class="admin-hint">(child)</span><% } %>
+            <% }); %>
+          </td>
+          <td class="nowrap">
+            <a class="btn btn-mini" href="/admin/composed-views/<%= v.key %>/edit">Edit</a>
+            <form method="POST" action="/admin/composed-views/<%= v.key %>/delete" style="display:inline" onsubmit="return confirm('Delete this view? This cannot be undone.');">
+              <button class="btn btn-mini btn-danger" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

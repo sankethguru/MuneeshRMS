@@ -1,6 +1,6 @@
 # Muneesh Legacy
 
-Rental & property management app, styled after a classic  enterprise
+Rental & property management app, styled after a classic Siebel enterprise
 UI (masthead, screen tabs, thread bar, list/detail applets, beveled
 toolbars). Fonts: **Cormorant Garamond** (headings/titles) + **DM Sans**
 (body/UI).
@@ -124,7 +124,7 @@ sub-tabs: **Tables**, **Views**, **Users**, **Audit Log**, **Backup**,
     both have a "bill #1".
   - **textarea** — adjustable **height (rows)**, set per field in Config.
 - **Views** — a dedicated admin sub-tab, separate from Fields, matching
-  's split between a table's underlying fields (Business Component)
+  Siebel's split between a table's underlying fields (Business Component)
   and how a screen displays them (Applet/View). For each table, choose
   exactly which fields appear as List columns, their display order
   (independent of the field order used on the Detail form), and a default
@@ -271,7 +271,7 @@ routes/admin.js          Admin screen routes (tables, fields, users, audit, back
 db.js                    Tiny JSON-file datastore for records (data/db.json), with a request-scoped read cache
 seed.js                  Sample starter data
 views/                   EJS templates (list.ejs, form.ejs, partials/, admin/, login.ejs, landing.ejs, account.ejs, 403.ejs)
-public/css/style.css      S-classic theme
+public/css/style.css      Siebel-classic theme
 public/js/app.js          Client-side helpers (currency live-preview, drag-and-drop reorder, filter panel toggle, etc.)
 ```
 
@@ -396,6 +396,24 @@ A parameter's field type is resolved and locked in at *definition* time
 filter control (dropdown, exact-match box, or from/to range) is always
 statically known — the same reasoning `FILTERABLE_TYPES`/`filterKindFor`
 already use for List and Child Applet filters.
+
+**Header Panel** shows detail-style fields above the results table,
+anchored to whichever record a chosen fk-typed parameter resolves to
+(e.g. picking a Tenant shows that tenant's — and its linked landlord's —
+info in a panel above the bill list, matching a statement layout more
+than a bare table). The one thing worth understanding if this code needs
+touching: header field expressions are evaluated against the **anchor
+entity** (e.g. `tenants`), not the report's own base table (`bills`) —
+`computeHeaderPanel` fetches the actual resolved record via the anchor
+parameter's value and runs `evalFormula` with *that* as the context, so
+a header field can reach further still (e.g. `T_MappedTo.LL_PAN`, from
+the anchor tenant through to its landlord) exactly like any other
+formula would. Building a report with this feature is necessarily
+two-step: the anchor dropdown only offers *already-saved* fk parameters
+(their type can't be known before the form is actually submitted), so a
+brand-new report needs saving once with its parameter first, then
+editing again to configure the panel. CSV export deliberately stays
+table-only — the panel is on-screen only, not included in the file.
 
 **Permissions**: a report needs read permission on its own base table
 only — not on every table its columns/parameters happen to reach via a

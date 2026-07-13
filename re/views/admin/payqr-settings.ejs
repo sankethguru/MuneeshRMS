@@ -1,0 +1,70 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'payqr' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">PayQR Settings</span>
+  </div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <% if (!payeesEntity || !paymentsEntity) { %>
+    <div class="format-warning">
+      <span class="warn-icon">&#9888;</span>
+      <span class="warn-text">
+        PayQR needs both a <code>payees</code> and a <code>payments</code> table to exist.
+        <% if (!payeesEntity) { %>The <strong>Payees</strong> table wasn't found.<% } %>
+        <% if (!paymentsEntity) { %>The <strong>Payments</strong> table wasn't found.<% } %>
+        If you're on an install that predates PayQR, see <code>migrate-payqr.js</code> in the app folder.
+      </span>
+    </div>
+  <% } else { %>
+
+    <% var isComplete = Object.keys(roleFields).every(function(k){ return roleFields[k].optional || settings[k]; }); %>
+    <% if (!isComplete || !payeePk || !paymentFk) { %>
+      <div class="format-warning">
+        <span class="warn-icon">&#9888;</span>
+        <span class="warn-text">
+          PayQR is <strong>not fully configured</strong>. Until every required field below is mapped, QR generation and narration auto-fill will fail with a clear error rather than guessing or silently doing nothing.
+        </span>
+      </div>
+    <% } %>
+
+    <p class="admin-help">
+      PayQR needs to know which field on <strong>Payees</strong> and <strong>Payments</strong> plays each role below.
+      Two things are figured out automatically and aren't listed here: which field uniquely identifies a payee
+      (<code><%= payeePk || '\u2014 not found' %></code>, the Payees table's primary key), and which field on
+      Payments links to Payees (<code><%= paymentFk || '\u2014 no matching link field found' %></code>). Everything
+      else needs to be set explicitly, since there's no way to guess "which field is the UPI ID" from field type alone.
+    </p>
+
+    <form class="detail-form" method="POST" action="/admin/payqr-settings">
+      <div class="field-grid">
+        <% Object.keys(roleFields).forEach(function(key){ var role = roleFields[key]; %>
+        <div class="field-row">
+          <label class="field-label"><%= role.label %><%= role.optional ? ' (optional)' : ' *' %></label>
+          <div class="field-value">
+            <select name="<%= key %>">
+              <option value="">&mdash; not set &mdash;</option>
+              <% role.options.forEach(function(f){ %>
+                <option value="<%= f.name %>" <%= settings[key] === f.name ? 'selected' : '' %>><%= f.label %> (<%= f.name %>)</option>
+              <% }); %>
+            </select>
+            <% if (role.optional) { %>
+              <p class="admin-hint">If set, a QR won't be generated for payees whose method here doesn't look like a UPI option (e.g. "Bank Account") &mdash; they'll see a message to pay manually instead. If left unset, this check is skipped.</p>
+            <% } %>
+            <% if (role.options.length === 0) { %>
+              <p class="admin-hint">No <%= role.types.join(' or ') %> field exists on <%= role.entity %> yet &mdash; add one under Admin &rarr; Tables &rarr; Fields first.</p>
+            <% } %>
+          </div>
+        </div>
+        <% }); %>
+      </div>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">Save Settings</button></div>
+    </form>
+  <% } %>
+</div>
+
+<%- include('../partials/foot') %>

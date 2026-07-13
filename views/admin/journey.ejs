@@ -1,0 +1,116 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'journey' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Getting Started &mdash; A Walkthrough</span>
+  </div>
+
+  <div style="padding: 16px 20px; max-width: 900px;">
+
+    <p class="admin-help">
+      This is a plain-language walkthrough of actually using this app, start to finish &mdash; setting up your
+      first landlord, tenant, and invoice, and recording your first payment. If you're looking for how the
+      <em>formula language</em> works (for building your own calculated fields or reports), that's a separate
+      page: <a href="/admin/help">Formula Language Reference</a>. This page is about the everyday workflow, not
+      the technical building blocks underneath it.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">The Big Picture</span></div>
+    <p class="admin-help">
+      Everything in this app connects together in one natural chain:
+    </p>
+    <p class="admin-help" style="font-family:monospace; background:#f7f6f0; padding:10px 14px; border:1px solid var(--border-dark);">
+      Landlord &rarr; Property &rarr; Tenant &rarr; Invoice &rarr; Payment
+    </p>
+    <p class="admin-help">
+      A <strong>Landlord</strong> owns one or more <strong>Properties</strong>. Each Property has one or more
+      <strong>Tenants</strong> renting space in it. Each Tenant gets billed periodically via an
+      <strong>Invoice</strong>. Money coming in against those invoices, and money going out to people you pay
+      (contractors, staff, anyone), gets tracked as a <strong>Payment</strong>. Setting things up roughly follows
+      that same order &mdash; you can't create a Tenant until the Property and Landlord it belongs to already
+      exist, for instance.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 1 &mdash; Add a Landlord</span></div>
+    <p class="admin-help">
+      Go to the <strong>Landlords</strong> tab and click <strong>+ New Record</strong>. Fill in their identity
+      details &mdash; name, PAN, GSTIN, address, and so on. If a landlord operates in more than one state (and
+      is GST-registered separately in each), you'll see a <strong>Group</strong> field &mdash; leave that pointing
+      at itself for the very first registration you create for this landlord (more on this in Step 4, since the
+      same idea applies to Tenants too, and it's easier to explain with a concrete example there).
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 2 &mdash; Add a Property</span></div>
+    <p class="admin-help">
+      Go to <strong>Property</strong>, click <strong>+ New Record</strong>, and link it to the Landlord you just
+      created. Fill in the address and, importantly, the <strong>State</strong> the property is actually located
+      in &mdash; this matters for GST later (it decides whether a bill is CGST+SGST or something else).
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 3 &mdash; Add Banking Info</span></div>
+    <p class="admin-help">
+      If you're tracking security deposits or other banking details tied to a tenant, set those up under
+      <strong>Banking</strong> before creating the tenant itself, since the Tenant form will ask you to link to
+      an existing Banking record rather than create one on the fly.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 4 &mdash; Add a Tenant (and understanding revisions)</span></div>
+    <p class="admin-help">
+      Go to <strong>Tenants</strong> and create your first tenant, linking them to the Property they're renting.
+      Give them a distinctive <strong>Tenant Code</strong> &mdash; something like <code>tenantA_1</code>, where
+      the trailing <code>_1</code> means "first version of this tenant's terms."
+    </p>
+    <p class="admin-help">
+      <strong>Why "first version"?</strong> Rent and lease terms change over time &mdash; a renewal, a rate
+      increase, a change in service category. If you just edited the same tenant record every time that
+      happened, every <em>old</em> invoice tied to that tenant would suddenly look like it used the
+      <em>new</em> terms too, which isn't right &mdash; an invoice from last year should always reflect what was
+      actually true last year. So instead, a change in terms means creating a <strong>new</strong> tenant record
+      (e.g. <code>tenantA_2</code>) rather than editing the old one.
+    </p>
+    <p class="admin-help">
+      To keep all these revisions recognizably "the same underlying tenant," you'll see a <strong>Group</strong>
+      field on the Tenant form. For the very first revision, set this to point at <em>itself</em> &mdash; you'll
+      need to save the record once first, then edit it again and pick itself from the dropdown (it can't appear
+      in its own list until it already exists). For every <em>later</em> revision of that same tenant, set Group
+      to point at that same first record. There's also an <strong>Is Current</strong> checkbox &mdash; exactly
+      one revision in the group should have this checked at any time (the active one); when you create a new
+      revision, remember to uncheck it on the old one.
+    </p>
+    <p class="admin-help">
+      This sounds like more steps than it is in practice &mdash; you'll only touch this when creating a
+      genuinely new revision, which for most tenants might be once a year or less.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 5 &mdash; Create an Invoice</span></div>
+    <p class="admin-help">
+      Go to <strong>Invoices</strong> and create one, linking it to the Tenant being billed and the Invoice Date.
+      Most of the other fields &mdash; base rent, CGST/SGST percentages and amounts, the total &mdash; fill
+      themselves in automatically once you save, calculated from the tenant's terms and the current GST rate for
+      that month. You shouldn't need to type those in by hand.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 6 &mdash; Record a Payment</span></div>
+    <p class="admin-help">
+      Go to <strong>Payments</strong> to record money going out to a Payee (set up under <strong>Payees</strong>
+      first if you haven't already). If a Payee has a UPI ID on file, you'll see a QR code you can scan directly
+      from your banking app to actually send the payment &mdash; no need to type an amount or UPI ID by hand into
+      your bank's app.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Where to Go From Here</span></div>
+    <p class="admin-help">
+      That's the whole everyday loop. A few things worth knowing exist, once you're comfortable with the basics:
+    </p>
+    <ul class="admin-help" style="padding-left: 20px;">
+      <li><strong>Reports</strong> &mdash; build your own custom views of the data (e.g. "every unpaid invoice this quarter") without needing anyone to build it for you. See Admin &rarr; Reports.</li>
+      <li><strong>Formula fields</strong> &mdash; if you want to calculate something new (a new field that derives its value from others), see the <a href="/admin/help">Formula Language Reference</a> for the exact syntax available.</li>
+      <li><strong>Backup</strong> &mdash; take a backup (Admin &rarr; Backup) before any big change you're unsure about. It's a safety net, and restoring an old one is straightforward if something goes wrong.</li>
+    </ul>
+
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

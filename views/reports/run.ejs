@@ -65,6 +65,36 @@
     <% if (result.error) { %>
       <div class="admin-notice err"><%= result.error %></div>
     <% } else { %>
+      <% if (result.headerPanel) { %>
+        <div class="applet-shell" style="margin:0 0 16px 0;">
+          <div class="header-panel-grid">
+            <div class="header-panel-col">
+              <% result.headerPanel.left.forEach(function(f){ %>
+                <div class="header-panel-field">
+                  <label class="field-label"><%= f.label %></label>
+                  <% if (f.renderType === 'textarea') { %>
+                    <textarea readonly rows="<%= f.rows || 3 %>"><%= f.value %></textarea>
+                  <% } else { %>
+                    <input type="text" readonly value="<%= f.value %>">
+                  <% } %>
+                </div>
+              <% }); %>
+            </div>
+            <div class="header-panel-col">
+              <% result.headerPanel.right.forEach(function(f){ %>
+                <div class="header-panel-field">
+                  <label class="field-label"><%= f.label %></label>
+                  <% if (f.renderType === 'textarea') { %>
+                    <textarea readonly rows="<%= f.rows || 3 %>"><%= f.value %></textarea>
+                  <% } else { %>
+                    <input type="text" readonly value="<%= f.value %>">
+                  <% } %>
+                </div>
+              <% }); %>
+            </div>
+          </div>
+        </div>
+      <% } %>
       <div class="applet-toolbar" style="padding:8px 12px;">
         <a class="btn btn-toolbar btn-mini" href="/reports/<%= def.key %>/export.csv<%= Object.keys(paramValues).length ? '?' + Object.entries(paramValues).map(function(e){ return (typeof e[1] === 'object') ? [e[0]+'_from='+encodeURIComponent(e[1].from||''), e[0]+'_to='+encodeURIComponent(e[1].to||'')].join('&') : e[0]+'='+encodeURIComponent(e[1]); }).join('&') : '' %>">Export CSV</a>
       </div>
@@ -83,6 +113,21 @@
               </tr>
             <% }); %>
           </tbody>
+          <% if (result.totals) { %>
+          <tfoot>
+            <tr class="row-total">
+              <% result.columns.forEach(function(c, i){ %>
+                <td>
+                  <% if (result.totals[c] !== null && result.totals[c] !== undefined) { %>
+                    <strong><%= result.totals[c] %></strong>
+                  <% } else if (i === 0) { %>
+                    <strong>Total</strong>
+                  <% } %>
+                </td>
+              <% }); %>
+            </tr>
+          </tfoot>
+          <% } %>
         </table>
       </div>
     <% } %>

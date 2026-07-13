@@ -1,0 +1,53 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'screens' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= screen ? 'Edit Screen: ' + screen.label : 'New Screen' %></span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/screens">&larr; Back to Screens</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <% var rows = (screen ? screen.views : []).map(function(v){ return { viewKey: v.viewKey }; }).concat([{},{},{}]); %>
+
+  <form class="detail-form" method="POST" action="<%= screen ? '/admin/screens/' + screen.key : '/admin/screens' %>">
+    <div class="field-grid">
+      <div class="field-row">
+        <label class="field-label">Screen Name *</label>
+        <div class="field-value"><input type="text" name="label" value="<%= screen ? screen.label : '' %>" required></div>
+      </div>
+    </div>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Views in this Screen</span></div>
+    <p class="admin-help">Which Views appear, and in what order. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder &mdash; safe here, unlike the View editor, since each row references a real View by its own stable key, not by position.</p>
+    <table class="list-table reorderable-form">
+      <thead><tr><th style="width:32px"></th><th>View</th><th></th></tr></thead>
+      <tbody id="screenViewsBody">
+        <% rows.forEach(function(r){ %>
+        <tr>
+          <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+          <td>
+            <select name="view_key[]">
+              <option value="">&mdash; view &mdash;</option>
+              <% views.forEach(function(v){ %>
+                <option value="<%= v.key %>" <%= r.viewKey === v.key ? 'selected' : '' %>><%= v.label %></option>
+              <% }); %>
+            </select>
+          </td>
+          <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)" title="Remove this row">&times;</button></td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('screenViewsBody')">+ Add Row</button></p>
+
+    <div class="form-actions"><button class="btn btn-primary" type="submit"><%= screen ? 'Save Screen' : 'Create Screen' %></button></div>
+  </form>
+</div>
+
+<%- include('../partials/foot') %>

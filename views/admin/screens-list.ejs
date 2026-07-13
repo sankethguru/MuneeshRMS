@@ -1,0 +1,51 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'screens' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Screens</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/screens/new">+ New Screen</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <p class="admin-help">
+    A Screen collects one or more <a href="/admin/composed-views">Views</a> together, in order — the same idea
+    as today's main nav tabs, just built from the new Applet/View system rather than tied to one table.
+  </p>
+
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Screen</th><th>Views</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% if (screens.length === 0) { %>
+          <tr><td colspan="3" class="empty-row">No screens yet &mdash; click "+ New Screen" to build one.</td></tr>
+        <% } %>
+        <% screens.forEach(function(s, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><strong><%= s.label %></strong></td>
+          <td>
+            <% (s.views || []).forEach(function(v, j){ %>
+              <% var vw = views.find(function(x){ return x.key === v.viewKey; }); %>
+              <%= j > 0 ? ', ' : '' %><%= vw ? vw.label : v.viewKey %>
+            <% }); %>
+          </td>
+          <td class="nowrap">
+            <a class="btn btn-mini" href="/screens/<%= s.key %>" target="_blank">Open</a>
+            <a class="btn btn-mini" href="/admin/screens/<%= s.key %>/edit">Edit</a>
+            <form method="POST" action="/admin/screens/<%= s.key %>/delete" style="display:inline" onsubmit="return confirm('Delete this screen? This cannot be undone.');">
+              <button class="btn btn-mini btn-danger" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

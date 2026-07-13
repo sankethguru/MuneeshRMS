@@ -17,6 +17,9 @@
   <% navOrder.forEach(function(key){ var e = entities[key]; if (!e) return; %>
     <a class="screen-tab <%= (activeKey === key) ? 'active' : '' %>" href="/<%= key %>"><%= e.label %></a>
   <% }); %>
+  <% if (typeof screens !== 'undefined' && screens) { screens.forEach(function(s){ %>
+    <a class="screen-tab <%= (activeKey === 'screen:' + s.key) ? 'active' : '' %>" href="/screens/<%= s.key %>"><%= s.label %></a>
+  <% }); } %>
   <% if (typeof currentUser !== 'undefined' && currentUser) { %>
     <a class="screen-tab <%= (activeKey === 'reports') ? 'active' : '' %>" href="/reports">Reports</a>
   <% } %>
@@ -37,6 +40,9 @@
       <span class="thread-sep">&raquo;</span>
       <span class="thread-crumb thread-current"><%= reportLabel %></span>
     <% } %>
+  <% } else if (typeof activeKey === 'string' && activeKey.indexOf('screen:') === 0 && typeof screen !== 'undefined' && screen) { %>
+    <span class="thread-sep">&raquo;</span>
+    <span class="thread-crumb thread-current"><%= screen.label %></span>
   <% } else if (activeKey && entities[activeKey]) { %>
     <span class="thread-sep">&raquo;</span>
     <span class="thread-crumb"><a href="/<%= activeKey %>"><%= entities[activeKey].label %></a></span>

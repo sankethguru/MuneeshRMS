@@ -15,6 +15,9 @@
       <% } %>
       <a class="btn btn-toolbar" href="/<%= entity.key %>">&larr; Back to List</a>
       <a class="btn btn-toolbar" href="/admin/<%= entity.key %>/fields">Edit Fields</a>
+      <% if (!isNew && canCreate) { %>
+        <a class="btn btn-toolbar" href="/<%= entity.key %>/new/form?duplicateFrom=<%= encodeURIComponent(record[entity.pk]) %>" title="Open a new record pre-filled with this one's fields">Duplicate</a>
+      <% } %>
       <% if (!isNew && canDelete) { %>
         <form method="POST" action="/<%= entity.key %>/<%= encodeURIComponent(record[entity.pk]) %>/delete" onsubmit="return confirm('Delete this record permanently?');" style="display:inline">
           <button class="btn btn-toolbar btn-danger" type="submit">Delete</button>
@@ -22,6 +25,8 @@
       <% } %>
     </div>
   </div>
+
+  <% if (error) { %><div class="admin-notice err" style="margin:0 0 12px 0;"><%= error %></div><% } %>
 
   <form class="detail-form" method="POST" action="<%= isNew ? '/' + entity.key : '/' + entity.key + '/' + encodeURIComponent(record[entity.pk]) %>" enctype="multipart/form-data">
     <div class="field-grid">
@@ -36,34 +41,52 @@
           <div class="field-value">
             <%
               var val = record[f.name];
-              var isLocked = (f.key && (!isNew || f.auto)) || readOnlyForm;
+              // A field can be locked for three independent reasons: it's
+              // the primary key (once a record exists), the whole form is
+              // read-only (no update permission), or the field itself is
+              // configured read-only (see Admin -> Fields -> Read-only:
+              // Always / After Creation). Previously only PK-locking and
+              // whole-form read-only applied, and only to some field
+              // types (text/number/currency/percent) — picklist, fk,
+              // checkbox, textarea, and date all used the whole-form flag
+              // directly and had no per-field concept at all. Unified
+              // here so the new setting works consistently everywhere.
+              var readOnlyByFieldSetting = f.readOnlyMode === 'always' || (f.readOnlyMode === 'afterCreation' && !isNew);
+              var isLocked = (f.key && (!isNew || f.auto)) || readOnlyForm || readOnlyByFieldSetting;
             %>
             <% if (f.type === 'formula' || f.type === 'rollup') { %>
               <input type="text" class="formula-display" value="<%= formatFormulaValue(f, val) %>" readonly title="<%= f.type === 'rollup' ? (f.rollupFn + ' of ' + f.rollupField + ' via ' + (f.rollupHop2Entity || f.rollupHop1Entity)) : ('Calculated: ' + f.formula) %>">
             <% } else if (f.type === 'series') { %>
               <input type="text" class="formula-display" value="<%= isNew ? '(assigned on save)' : val %>" readonly title="Auto-numbered series">
             <% } else if (f.type === 'picklist') { %>
-              <select id="fld_<%= f.name %>" name="<%= f.name %>" <%= readOnlyForm ? 'disabled' : '' %>>
+              <% var pd = picklistFieldData[f.name] || { options: picklistOptions(f), constrainedBy: null, allOptionsWithConstraint: [] }; %>
+              <select id="fld_<%= f.name %>" name="<%= f.name %>" <%= pd.constrainedBy ? 'data-constrained-by="fld_' + pd.constrainedBy + '"' : '' %> <%= isLocked ? 'disabled' : '' %>>
                 <option value="">&mdash; none &mdash;</option>
-                <% picklistOptions(f).forEach(function(opt){ %>
-                  <option value="<%= opt %>" <%= (String(val) === opt) ? 'selected' : '' %>><%= opt %></option>
-                <% }); %>
+                <% if (pd.constrainedBy) { %>
+                  <% pd.allOptionsWithConstraint.forEach(function(opt){ %>
+                    <option value="<%= opt.value %>" data-constraint="<%= opt.constraintValue %>" <%= (String(val) === opt.value) ? 'selected' : '' %> <%= pd.options.includes(opt.value) ? '' : 'style="display:none"' %>><%= opt.value %></option>
+                  <% }); %>
+                <% } else { %>
+                  <% pd.options.forEach(function(opt){ %>
+                    <option value="<%= opt %>" <%= (String(val) === opt) ? 'selected' : '' %>><%= opt %></option>
+                  <% }); %>
+                <% } %>
               </select>
             <% } else if (f.type === 'fk') { %>
-              <select id="fld_<%= f.name %>" name="<%= f.name %>" <%= readOnlyForm ? 'disabled' : '' %>>
+              <select id="fld_<%= f.name %>" name="<%= f.name %>" <%= isLocked ? 'disabled' : '' %>>
                 <option value="">&mdash; none &mdash;</option>
                 <% (fkOptions[f.name] || []).forEach(function(opt){ %>
                   <option value="<%= opt.value %>" <%= (String(val) === String(opt.value)) ? 'selected' : '' %>><%= opt.label %></option>
                 <% }); %>
               </select>
             <% } else if (f.type === 'bool') { %>
-              <input type="checkbox" id="fld_<%= f.name %>" name="<%= f.name %>" <%= val ? 'checked' : '' %> <%= readOnlyForm ? 'disabled' : '' %>>
+              <input type="checkbox" id="fld_<%= f.name %>" name="<%= f.name %>" <%= val ? 'checked' : '' %> <%= isLocked ? 'disabled' : '' %>>
             <% } else if (f.type === 'textarea') { %>
-              <textarea id="fld_<%= f.name %>" name="<%= f.name %>" rows="<%= f.rows || 2 %>" <%= readOnlyForm ? 'readonly' : '' %>><%= val %></textarea>
+              <textarea id="fld_<%= f.name %>" name="<%= f.name %>" rows="<%= f.rows || 2 %>" <%= isLocked ? 'readonly' : '' %>><%= val %></textarea>
             <% } else if (f.type === 'date') { %>
-              <input type="date" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= val %>" <%= readOnlyForm ? 'readonly' : '' %>>
+              <input type="date" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= val %>" <%= isLocked ? 'readonly' : '' %>>
             <% } else if (f.type === 'timestamp') { %>
-              <input type="datetime-local" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= (val || '').toString().slice(0,16) %>" <%= readOnlyForm ? 'readonly' : '' %>>
+              <input type="datetime-local" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= (val || '').toString().slice(0,16) %>" <%= isLocked ? 'readonly' : '' %>>
             <% } else if (f.type === 'currency') { %>
               <input type="hidden" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= val %>">
               <input type="text" inputmode="decimal" class="currency-field" id="fld_<%= f.name %>_disp" value="<%= formatINR(val) %>"
@@ -81,8 +104,8 @@
                 <% if (val) { %>
                   <img class="image-thumb" src="/uploads/<%= entity.key %>/<%= f.name %>/<%= val %>" alt="<%= f.label %>">
                 <% } %>
-                <% if (!readOnlyForm) { %>
-                  <input type="file" id="fld_<%= f.name %>" name="img_<%= f.name %>" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml">
+                <% if (!isLocked) { %>
+                  <input type="file" id="fld_<%= f.name %>" name="img_<%= f.name %>" accept="image/jpeg,image/png,image/gif,image/webp">
                   <% if (val) { %>
                     <label class="image-clear"><input type="checkbox" name="__clear_<%= f.name %>"> Clear image</label>
                   <% } %>
@@ -90,6 +113,9 @@
               </div>
             <% } else { %>
               <input type="text" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= val %>" <%= isLocked ? 'readonly' : '' %> <%= f.required ? 'required' : '' %>>
+            <% } %>
+            <% if (f.hint) { %>
+              <p class="field-hint <%= f.hintImportant ? 'field-hint-important' : '' %>"><%- renderHintHtml(f.hint) %></p>
             <% } %>
           </div>
         </div>

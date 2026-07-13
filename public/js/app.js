@@ -38,7 +38,21 @@ function mlAddReportRow(tbodyId) {
   var clone = rows[rows.length - 1].cloneNode(true);
   clone.querySelectorAll('input[type="text"], input[type="number"]').forEach(function (el) { el.value = ''; });
   clone.querySelectorAll('select').forEach(function (el) { el.selectedIndex = 0; });
+  clone.querySelectorAll('input[type="checkbox"]').forEach(function (el) {
+    el.checked = false;
+    if (el.previousElementSibling && el.previousElementSibling.type === 'hidden') el.previousElementSibling.value = '0';
+  });
   tbody.appendChild(clone);
+}
+
+// Removes the row containing the clicked button. Rows aren't saved data
+// until the whole form submits, so this is just a DOM removal — no
+// server call, same reasoning as mlAddReportRow above. Deleting down to
+// zero rows in a section is fine; existing server-side validation (e.g.
+// "add at least one column") already handles that case correctly.
+function mlRemoveReportRow(button) {
+  var row = button.closest('tr');
+  if (row) row.remove();
 }
 
 // ---- Expand/collapse for list applets --------------------------------
@@ -157,6 +171,31 @@ document.addEventListener('DOMContentLoaded', function () {
       },
     });
   });
+
+  // Same reorder-then-POST behavior as above, but for a flat, non-table
+  // container (e.g. the Admin subnav's row of tabs) — no drag handle
+  // needed here, since SortableJS already distinguishes a plain click
+  // (no movement) from an actual drag, so the tabs stay normally
+  // clickable while also being draggable.
+  document.querySelectorAll('.reorderable-list').forEach(function (container) {
+    var url = container.getAttribute('data-reorder-url');
+    if (!url) return;
+    Sortable.create(container, {
+      animation: 140,
+      ghostClass: 'row-dragging',
+      onEnd: function () {
+        var ids = Array.from(container.querySelectorAll('[data-item-id]'))
+          .map(function (el) { return el.getAttribute('data-item-id'); });
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order: ids }),
+        }).then(function (res) {
+          if (!res.ok) alert('Reorder failed. Please try again.');
+        }).catch(function () { alert('Reorder failed. Please try again.'); });
+      },
+    });
+  });
 });
 
 // Indian-style currency formatting (₹x,xx,xxx.xx), mirrors schema.js formatINR
@@ -235,3 +274,40 @@ function mlPercentBlur(name) {
   if (!hidden || !disp) return;
   disp.value = mlFormatPercent(hidden.value);
 }
+
+// Constrained picklist live filtering — a picklist field configured with
+// a Constraint Field (Admin -> Fields, "Constrain by") narrows its
+// options to only those matching a sibling field's current value, e.g.
+// a Credit Cards picklist only showing cards where the Banking table's
+// own Account Type matches this record's Account Type field. The server
+// already renders the CORRECT initial state (matching options visible,
+// others display:none) — this just keeps it correct as the constraining
+// field changes live, without a page reload, since the whole point is
+// letting someone pick Account Type first and immediately see a
+// narrowed Card list.
+document.addEventListener('DOMContentLoaded', function () {
+  function refilterConstrainedPicklist(select) {
+    var constrainingFieldId = select.getAttribute('data-constrained-by');
+    var constrainingEl = document.getElementById(constrainingFieldId);
+    var constraintValue = constrainingEl ? constrainingEl.value : '';
+    var currentValueStillValid = !select.value; // blank is always "valid"
+    Array.from(select.options).forEach(function (opt) {
+      if (!opt.value) return; // the "— none —" placeholder always stays visible
+      var matches = !constraintValue || opt.getAttribute('data-constraint') === constraintValue;
+      opt.style.display = matches ? '' : 'none';
+      if (matches && opt.value === select.value) currentValueStillValid = true;
+    });
+    // If the previously-selected option no longer matches the new
+    // constraint, clear the selection rather than silently keep an
+    // option selected that's now hidden and shouldn't be choosable.
+    if (select.value && !currentValueStillValid) select.value = '';
+  }
+
+  document.querySelectorAll('select[data-constrained-by]').forEach(function (select) {
+    var constrainingEl = document.getElementById(select.getAttribute('data-constrained-by'));
+    if (constrainingEl) {
+      constrainingEl.addEventListener('change', function () { refilterConstrainedPicklist(select); });
+    }
+    refilterConstrainedPicklist(select); // apply once on load too, as a consistency double-check
+  });
+});

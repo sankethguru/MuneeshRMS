@@ -16,7 +16,9 @@
     var cols = (def ? def.columns : []).concat([{},{},{}]);
     var params = (def ? def.parameters : []).concat([{},{},{}]);
     var aggs = (def ? def.aggregates : []).concat([{},{},{}]);
-    var formatOptions = ['none', 'currency', 'percent', 'date', 'datetime'];
+    var hdrs = (def ? def.headerFields : []).concat([{},{},{}]);
+    var fkParams = (def ? def.parameters : []).filter(function(p){ return !!p.anchorRef; });
+    var formatOptions = ['none', 'number', 'currency', 'percent', 'date', 'datetime'];
   %>
 
   <form class="detail-form" method="POST" action="<%= def ? '/admin/reports/' + def.key : '/admin/reports' %>">
@@ -53,9 +55,9 @@
     </div>
 
     <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Columns (Detail Mode)</span></div>
-    <p class="admin-help">Used when Group By below is left blank &mdash; one row per matching record, one column per row here. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder.</p>
+    <p class="admin-help">Used when Group By below is left blank &mdash; one row per matching record, one column per row here. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder. Check "Total" to show a grand-total row summing that column &mdash; only allowed on Currency/Percent/Number-formatted columns.</p>
     <table class="list-table reorderable-form">
-      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Column Label</th><th>Format</th></tr></thead>
+      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Column Label</th><th>Format</th><th>Total</th><th></th></tr></thead>
       <tbody id="columnsBody">
         <% cols.forEach(function(c){ %>
         <tr>
@@ -67,6 +69,11 @@
               <% formatOptions.forEach(function(f){ %><option value="<%= f %>" <%= c.format === f ? 'selected' : '' %>><%= f %></option><% }); %>
             </select>
           </td>
+          <td style="text-align:center">
+            <input type="hidden" name="col_total[]" value="<%= c.total ? '1' : '0' %>">
+            <input type="checkbox" <%= c.total ? 'checked' : '' %> onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
+          </td>
+          <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)" title="Remove this row">&times;</button></td>
         </tr>
         <% }); %>
       </tbody>
@@ -74,7 +81,7 @@
     <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('columnsBody')">+ Add Row</button></p>
 
     <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Group By &amp; Aggregates (Grouped Mode)</span></div>
-    <p class="admin-help">Set Group By to switch this report to grouped mode (one row per group, ignores Columns above). Leave blank for detail mode. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder aggregate columns.</p>
+    <p class="admin-help">Set Group By to switch this report to grouped mode (one row per group, ignores Columns above). Leave blank for detail mode. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder aggregate columns. Check "Total" for a grand total across all groups &mdash; only allowed on SUM/COUNT aggregates (averaging/min/max across groups isn't a valid overall total).</p>
     <div class="field-grid">
       <div class="field-row">
         <label class="field-label">Group By</label>
@@ -86,7 +93,7 @@
       </div>
     </div>
     <table class="list-table reorderable-form">
-      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Function</th><th>Column Label</th><th>Format</th></tr></thead>
+      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Function</th><th>Column Label</th><th>Format</th><th>Total</th><th></th></tr></thead>
       <tbody id="aggregatesBody">
         <% aggs.forEach(function(a){ %>
         <tr>
@@ -103,6 +110,11 @@
               <% formatOptions.forEach(function(f){ %><option value="<%= f %>" <%= a.format === f ? 'selected' : '' %>><%= f %></option><% }); %>
             </select>
           </td>
+          <td style="text-align:center">
+            <input type="hidden" name="agg_total[]" value="<%= a.total ? '1' : '0' %>">
+            <input type="checkbox" <%= a.total ? 'checked' : '' %> onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
+          </td>
+          <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)" title="Remove this row">&times;</button></td>
         </tr>
         <% }); %>
       </tbody>
@@ -110,21 +122,100 @@
     <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('aggregatesBody')">+ Add Row</button></p>
 
     <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Parameters</span></div>
-    <p class="admin-help">Shown as live pickers when someone runs this report &mdash; a landlord/tenant/date/amount they choose at that moment, not fixed by you here. The field's type (bool/picklist/lookup/date/number/currency/percent/text) decides which control they see; other types can't be used as parameters. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder.</p>
+    <p class="admin-help">Shown as live pickers when someone runs this report &mdash; a landlord/tenant/date/amount they choose at that moment, not fixed by you here. A plain field or one cross-table hop (e.g. <code>tenants.T_Active</code>) auto-detects its type. A calculated expression (e.g. <code>BILLS_Total - BILLS_RentRecd</code>) needs an explicit Data Kind below, since there's no way to infer what it produces without running it &mdash; leave Data Kind blank for simple fields. A real lookup (fk) field already knows which table it links to; a formula field or calculated expression doesn't &mdash; set Anchor Table explicitly if you want to use one of those as the Header Panel's anchor. If the parameter's value doesn't directly identify one record (e.g. it's a group tag several records share), use Anchor Resolver &mdash; a condition, same formula language as everywhere else, that picks exactly one row; the parameter's own value is available inside it as <code>ANCHOR.VALUE</code>. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder.</p>
     <table class="list-table reorderable-form">
-      <thead><tr><th style="width:32px"></th><th>Parameter Key *</th><th>Label</th><th>Field *</th></tr></thead>
+      <thead><tr><th style="width:32px"></th><th>Parameter Key *</th><th>Label</th><th>Field *</th><th>Data Kind <span class="admin-hint">(calculated fields only)</span></th><th>Anchor Table <span class="admin-hint">(non-lookup fields only)</span></th><th>Anchor Resolver <span class="admin-hint">(optional)</span></th><th></th></tr></thead>
       <tbody id="parametersBody">
         <% params.forEach(function(p){ %>
         <tr>
           <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
           <td><input type="text" name="param_key[]" value="<%= p.key || '' %>" placeholder="e.g. tenant"></td>
           <td><input type="text" name="param_label[]" value="<%= p.label || '' %>" placeholder="e.g. Tenant"></td>
-          <td><input type="text" name="param_field[]" value="<%= p.field || '' %>" style="width:100%" placeholder="e.g. BILLS_ClientCode"></td>
+          <td><input type="text" name="param_field[]" value="<%= p.field || '' %>" style="width:100%" placeholder="e.g. BILLS_ClientCode or BILLS_Total - BILLS_RentRecd"></td>
+          <td>
+            <select name="param_datakind[]">
+              <option value="" <%= !p.dataKind ? 'selected' : '' %>>&mdash; auto (simple field) &mdash;</option>
+              <option value="text" <%= p.dataKind === 'text' ? 'selected' : '' %>>Text (exact match)</option>
+              <option value="bool" <%= p.dataKind === 'bool' ? 'selected' : '' %>>Yes/No</option>
+              <option value="date-range" <%= p.dataKind === 'date-range' ? 'selected' : '' %>>Date range</option>
+              <option value="number-range" <%= p.dataKind === 'number-range' ? 'selected' : '' %>>Number range</option>
+              <option value="percent-range" <%= p.dataKind === 'percent-range' ? 'selected' : '' %>>Percent range</option>
+            </select>
+          </td>
+          <td>
+            <select name="param_anchortable[]">
+              <option value="" <%= !p.anchorTable ? 'selected' : '' %>>&mdash; none / auto (lookup fields) &mdash;</option>
+              <% Object.values(entities).forEach(function(e){ %>
+                <option value="<%= e.key %>" <%= p.anchorTable === e.key ? 'selected' : '' %>><%= e.label %> (<%= e.key %>)</option>
+              <% }); %>
+            </select>
+          </td>
+          <td><input type="text" name="param_anchorresolver[]" value="<%= p.anchorResolver || '' %>" style="width:100%" placeholder="e.g. tenants.T_GroupRoot = ANCHOR.VALUE AND tenants.T_Is_Current = true"></td>
+          <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)" title="Remove this row">&times;</button></td>
         </tr>
         <% }); %>
       </tbody>
     </table>
     <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('parametersBody')">+ Add Row</button></p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Header Panel</span></div>
+    <p class="admin-help">
+      Detail-style fields shown above the results table, evaluated once against whichever record a lookup
+      parameter resolves to (e.g. picking "Tenant" shows that tenant's &mdash; and its linked landlord's &mdash;
+      info in a panel above the bill list). Any parameter with a resolved Anchor Table qualifies &mdash; either a real lookup (fk) field auto-detects one, or a non-lookup field (formula, picklist, calculated expression) can have one set explicitly above.
+      <% if (fkParams.length === 0) { %>
+        <strong>Save this report with at least one lookup (fk) parameter first</strong>, then come back to set
+        up the header panel &mdash; the anchor dropdown below needs a saved parameter to choose from.
+      <% } %>
+    </p>
+    <div class="field-grid">
+      <div class="field-row">
+        <label class="field-label">Anchor Parameter</label>
+        <div class="field-value">
+          <select name="headerAnchorParam" <%= fkParams.length === 0 ? 'disabled' : '' %>>
+            <option value="">&mdash; none (no header panel) &mdash;</option>
+            <% fkParams.forEach(function(p){ %>
+              <option value="<%= p.key %>" <%= def && def.headerAnchorParam === p.key ? 'selected' : '' %>><%= p.label %> (<%= p.key %>)</option>
+            <% }); %>
+          </select>
+          <% if (fkParams.length === 0 && def && def.headerAnchorParam) { %>
+            <input type="hidden" name="headerAnchorParam" value="<%= def.headerAnchorParam %>">
+          <% } %>
+        </div>
+      </div>
+    </div>
+    <table class="list-table reorderable-form">
+      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Label</th><th>Type</th><th>Rows</th><th>Format</th><th>Column</th><th></th></tr></thead>
+      <tbody id="headerFieldsBody">
+        <% hdrs.forEach(function(h){ %>
+        <tr>
+          <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+          <td><input type="text" name="hdr_expr[]" value="<%= h.expr || '' %>" style="width:100%" placeholder="e.g. T_MappedTo.LL_PAN"></td>
+          <td><input type="text" name="hdr_label[]" value="<%= h.label || '' %>" style="width:100%" placeholder="defaults to expression"></td>
+          <td>
+            <select name="hdr_rendertype[]">
+              <option value="text" <%= h.renderType === 'text' || !h.renderType ? 'selected' : '' %>>Text (single line)</option>
+              <option value="textarea" <%= h.renderType === 'textarea' ? 'selected' : '' %>>Textarea (multi-line)</option>
+            </select>
+          </td>
+          <td><input type="number" name="hdr_rows[]" value="<%= h.rows || '' %>" style="width:60px" placeholder="3" title="Only used for Textarea"></td>
+          <td>
+            <select name="hdr_format[]">
+              <% formatOptions.forEach(function(f){ %><option value="<%= f %>" <%= h.format === f ? 'selected' : '' %>><%= f %></option><% }); %>
+            </select>
+          </td>
+          <td>
+            <select name="hdr_column[]">
+              <option value="left" <%= h.column === 'left' || !h.column ? 'selected' : '' %>>Left</option>
+              <option value="right" <%= h.column === 'right' ? 'selected' : '' %>>Right</option>
+            </select>
+          </td>
+          <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)" title="Remove this row">&times;</button></td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('headerFieldsBody')">+ Add Row</button></p>
 
     <div class="form-actions"><button class="btn btn-primary" type="submit">Save Report</button></div>
   </form>

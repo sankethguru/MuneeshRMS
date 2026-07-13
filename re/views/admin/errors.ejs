@@ -1,0 +1,51 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'errors' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Recent Server Errors</span>
+    <div class="applet-toolbar">
+      <% if (entries.length > 0) { %>
+      <form method="POST" action="/admin/errors/clear" style="display:inline" onsubmit="return confirm('Clear the entire error log? This cannot be undone.');">
+        <button class="btn btn-toolbar" type="submit">Clear Log</button>
+      </form>
+      <% } %>
+      <a class="btn btn-toolbar" href="/admin">&larr; Back to Admin</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <p class="admin-help">Server-side crashes (500 responses) get recorded here. Everyday validation messages &mdash; formula <code>#ERR</code>, LOOKUP <code>#REF</code>, &quot;PK conflict cancels the whole import&quot; and the like &mdash; are not treated as errors, so they don&rsquo;t show up here. The log rolls automatically at ~2 MB per file (one backup kept, ~4 MB max on disk).</p>
+
+  <% if (entries.length === 0) { %>
+    <div class="empty-row" style="padding:24px;text-align:center;">No recent errors logged. Good sign.</div>
+  <% } else { %>
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>When</th><th>Route</th><th>User</th><th>Error</th></tr></thead>
+      <tbody>
+        <% entries.forEach(function(e, i){
+          var ds = e.ts.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+          var when = ds ? (ds[3] + '-' + ds[2] + '-' + ds[1] + ' ' + ds[4] + ':' + ds[5] + ':' + ds[6]) : e.ts;
+        %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td class="nowrap"><%= when %></td>
+          <td><code><%= e.route %></code></td>
+          <td><%= e.user %></td>
+          <td>
+            <div><strong><%= e.message %></strong></div>
+            <% if (e.stack) { %>
+              <details><summary class="admin-hint">stack</summary><pre class="error-stack"><%= e.stack %></pre></details>
+            <% } %>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+  <% } %>
+</div>
+
+<%- include('../partials/foot') %>

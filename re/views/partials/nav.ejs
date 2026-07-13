@@ -1,0 +1,52 @@
+<div class="masthead">
+  <div class="masthead-brand">
+    <span class="brand-mark">ML</span>
+    <span class="brand-name">Muneesh Legacy</span>
+  </div>
+  <div class="masthead-right">
+    <% if (typeof currentUser !== 'undefined' && currentUser) { %>
+      <span class="masthead-user"><%= currentUser.username %><%= currentUser.isAdmin ? ' (Admin)' : '' %></span>
+      <a class="btn btn-mini" href="/account">My Account</a>
+      <form method="POST" action="/logout" style="display:inline"><button class="btn btn-mini" type="submit">Log Out</button></form>
+    <% } %>
+  </div>
+</div>
+
+<div class="screen-tabs">
+  <a class="screen-tab <%= (!activeKey) ? 'active' : '' %>" href="/">Home</a>
+  <% navOrder.forEach(function(key){ var e = entities[key]; if (!e) return; %>
+    <a class="screen-tab <%= (activeKey === key) ? 'active' : '' %>" href="/<%= key %>"><%= e.label %></a>
+  <% }); %>
+  <% if (typeof currentUser !== 'undefined' && currentUser) { %>
+    <a class="screen-tab <%= (activeKey === 'reports') ? 'active' : '' %>" href="/reports">Reports</a>
+  <% } %>
+  <% if (typeof currentUser !== 'undefined' && currentUser && currentUser.isAdmin) { %>
+    <a class="screen-tab admin-tab <%= (activeKey === 'admin') ? 'active' : '' %>" href="/admin">&#9881; Admin</a>
+  <% } %>
+</div>
+
+<div class="thread-bar">
+  <span class="thread-crumb"><a href="/">Screen Home</a></span>
+  <% if (activeKey === 'admin') { %>
+    <span class="thread-sep">&raquo;</span>
+    <span class="thread-crumb"><a href="/admin">Application Administration</a></span>
+  <% } else if (activeKey === 'reports') { %>
+    <span class="thread-sep">&raquo;</span>
+    <span class="thread-crumb"><a href="/reports">Reports</a></span>
+    <% if (typeof reportLabel !== 'undefined' && reportLabel) { %>
+      <span class="thread-sep">&raquo;</span>
+      <span class="thread-crumb thread-current"><%= reportLabel %></span>
+    <% } %>
+  <% } else if (activeKey && entities[activeKey]) { %>
+    <span class="thread-sep">&raquo;</span>
+    <span class="thread-crumb"><a href="/<%= activeKey %>"><%= entities[activeKey].label %></a></span>
+    <% if (typeof recordLabel !== 'undefined' && recordLabel) { %>
+      <span class="thread-sep">&raquo;</span>
+      <span class="thread-crumb thread-current"><%= recordLabel %></span>
+    <% } %>
+  <% } %>
+</div>
+
+<% if (typeof currentUser !== 'undefined' && currentUser && currentUser.mustChangePassword) { %>
+  <div class="admin-notice err password-reminder">You're using the default admin password &mdash; <a href="/account">change it now</a>.</div>
+<% } %>

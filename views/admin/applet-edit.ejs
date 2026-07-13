@@ -1,0 +1,127 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'applets' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= applet ? 'Edit Applet: ' + applet.label : 'New Applet' %></span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/applets">&larr; Back to Applets</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <% var cols = (applet && applet.type === 'list' ? applet.columns : []).map(function(c){ return { name: c }; }).concat([{},{},{}]); %>
+  <% var baseFields = applet ? entities[applet.baseTable].fields.filter(function(f){ return f.type !== 'spacer' && f.type !== 'section'; }) : []; %>
+
+  <form class="detail-form" method="POST" action="<%= applet ? '/admin/applets/' + applet.key : '/admin/applets' %>">
+    <div class="field-grid">
+      <div class="field-row">
+        <label class="field-label">Applet Name *</label>
+        <div class="field-value"><input type="text" name="label" value="<%= applet ? applet.label : '' %>" required></div>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Type *</label>
+        <div class="field-value">
+          <select name="type" <%= applet ? 'disabled' : '' %> required>
+            <option value="list" <%= !applet || applet.type === 'list' ? 'selected' : '' %>>List</option>
+            <option value="detail" <%= applet && applet.type === 'detail' ? 'selected' : '' %>>Detail</option>
+          </select>
+          <% if (applet) { %>
+            <input type="hidden" name="type" value="<%= applet.type %>">
+            <p class="admin-hint">Type can't change after creation. Make a new applet instead.</p>
+          <% } %>
+        </div>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Base Table *</label>
+        <div class="field-value">
+          <select name="baseTable" <%= applet ? 'disabled' : '' %> required>
+            <% Object.values(entities).forEach(function(e){ %>
+              <option value="<%= e.key %>" <%= applet && applet.baseTable === e.key ? 'selected' : '' %>><%= e.label %> (<%= e.key %>)</option>
+            <% }); %>
+          </select>
+          <% if (applet) { %>
+            <input type="hidden" name="baseTable" value="<%= applet.baseTable %>">
+            <p class="admin-hint">Base table can't change after creation &mdash; columns/filter/sort below are all written against it. Make a new applet instead.</p>
+          <% } %>
+        </div>
+      </div>
+    </div>
+
+    <% if (!applet) { %>
+      <p class="admin-help">Save this first, then come back to set up columns, filter, and sort &mdash; those need the base table to already be fixed so real field checkboxes/dropdowns can be shown, rather than a client-side reload as you change tables.</p>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">Create Applet</button></div>
+    <% } else { %>
+
+      <% if (applet.type === 'list') { %>
+        <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Columns</span></div>
+        <p class="admin-help">Which fields show, and in what order, when this applet renders as a list. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder.</p>
+        <table class="list-table reorderable-form">
+          <thead><tr><th style="width:32px"></th><th>Field</th><th></th></tr></thead>
+          <tbody id="columnsBody">
+            <% cols.forEach(function(c){ %>
+            <tr>
+              <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+              <td>
+                <select name="columns[]">
+                  <option value="">&mdash; field &mdash;</option>
+                  <% baseFields.forEach(function(f){ %>
+                    <option value="<%= f.name %>" <%= c.name === f.name ? 'selected' : '' %>><%= f.label %> (<%= f.name %>)</option>
+                  <% }); %>
+                </select>
+              </td>
+              <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)" title="Remove this row">&times;</button></td>
+            </tr>
+            <% }); %>
+          </tbody>
+        </table>
+        <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('columnsBody')">+ Add Row</button></p>
+
+        <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Sort</span></div>
+        <div class="field-grid">
+          <div class="field-row">
+            <label class="field-label">Sort Field</label>
+            <div class="field-value">
+              <select name="sortField">
+                <option value="">&mdash; none &mdash;</option>
+                <% baseFields.forEach(function(f){ %>
+                  <option value="<%= f.name %>" <%= applet.sortField === f.name ? 'selected' : '' %>><%= f.label %> (<%= f.name %>)</option>
+                <% }); %>
+              </select>
+            </div>
+          </div>
+          <div class="field-row">
+            <label class="field-label">Sort Direction</label>
+            <div class="field-value">
+              <select name="sortDir">
+                <option value="asc" <%= applet.sortDir !== 'desc' ? 'selected' : '' %>>Ascending</option>
+                <option value="desc" <%= applet.sortDir === 'desc' ? 'selected' : '' %>>Descending</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      <% } else { %>
+        <p class="admin-help">Detail applets show every field on <code><%= applet.baseTable %></code>, laid out the same way its normal Detail screen already is &mdash; no column picker needed.</p>
+      <% } %>
+
+      <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Filter</span></div>
+      <p class="admin-help">
+        Optional. Same formula syntax as calculated fields &mdash; cross-table references, arithmetic, <code>IF()</code>, etc.
+        Always applied, independent of anything a View might add on top (e.g. a master-detail link). Leave blank to include every row.
+      </p>
+      <div class="field-grid">
+        <div class="field-row">
+          <label class="field-label">Filter Condition</label>
+          <div class="field-value"><input type="text" name="filterCondition" value="<%= applet.filterCondition %>" style="width:100%" placeholder="e.g. LL_GroupRoot = LL_Code"></div>
+        </div>
+      </div>
+
+      <div class="form-actions"><button class="btn btn-primary" type="submit">Save Applet</button></div>
+    <% } %>
+  </form>
+</div>
+
+<%- include('../partials/foot') %>

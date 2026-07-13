@@ -1,0 +1,242 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'views' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= entity.label %> &mdash; List View</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/admin/<%= entity.key %>/fields">Fields</a>
+      <a class="btn btn-toolbar" href="/admin/views">&larr; Back to Views</a>
+    </div>
+  </div>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <p class="admin-help" style="padding-top:10px;">Columns shown on the <strong><%= entity.label %></strong> List screen — drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder:</p>
+  <div class="list-table-wrap">
+    <table class="list-table reorderable">
+      <thead><tr><th style="width:32px"></th><th>Field</th><th>Type</th><th>&nbsp;</th></tr></thead>
+      <tbody data-reorder-url="/admin/<%= entity.key %>/views/columns/reorder">
+        <% if (included.length === 0) { %>
+          <tr><td colspan="4" class="empty-row">No columns selected &mdash; the list will show "No records found" styling only. Add some below.</td></tr>
+        <% } %>
+        <% included.forEach(function(f){ %>
+        <tr data-item-id="<%= f.name %>">
+          <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+          <td><strong><%= f.label %></strong> <code style="font-size:10px;color:#999;"><%= f.name %></code></td>
+          <td><%= f.type %></td>
+          <td>
+            <form method="POST" action="/admin/<%= entity.key %>/views/columns/<%= f.name %>/remove" style="display:inline">
+              <button class="btn btn-mini btn-danger" type="submit">Remove</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if (excluded.length > 0) { %>
+  <p class="admin-help">Available fields not currently shown in the list:</p>
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Field</th><th>Type</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% excluded.forEach(function(f, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><strong><%= f.label %></strong> <code style="font-size:10px;color:#999;"><%= f.name %></code></td>
+          <td><%= f.type %></td>
+          <td>
+            <form method="POST" action="/admin/<%= entity.key %>/views/columns/<%= f.name %>/add" style="display:inline">
+              <button class="btn btn-mini" type="submit">Add to List</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+  <% } %>
+
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Default Sort</span></div>
+  <form class="detail-form" method="POST" action="/admin/<%= entity.key %>/views/sort">
+    <div class="field-grid">
+      <div class="field-row"><label class="field-label">Sort By</label><div class="field-value">
+        <select name="sortField">
+          <option value="">&mdash; insertion order (no sort) &mdash;</option>
+          <% entity.fields.forEach(function(f){ %>
+            <option value="<%= f.name %>" <%= entity.sortField===f.name ? 'selected' : '' %>><%= f.label %></option>
+          <% }); %>
+        </select>
+      </div></div>
+      <div class="field-row"><label class="field-label">Direction</label><div class="field-value">
+        <select name="sortDir">
+          <option value="asc" <%= entity.sortDir==='asc' ? 'selected' : '' %>>Ascending (A&rarr;Z, 0&rarr;9, oldest first)</option>
+          <option value="desc" <%= entity.sortDir==='desc' ? 'selected' : '' %>>Descending (Z&rarr;A, 9&rarr;0, newest first)</option>
+        </select>
+      </div></div>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save Sort Order</button></div>
+  </form>
+
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">List Filters</span></div>
+  <p class="admin-help">Fields that get a filter control on the <strong><%= entity.label %></strong> List screen, behind the collapsed Filter button. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder. Only checkbox, dropdown, lookup, and date fields can be filters &mdash; other types are already searchable via the Query box.</p>
+  <div class="list-table-wrap">
+    <table class="list-table reorderable">
+      <thead><tr><th style="width:32px"></th><th>Field</th><th>Type</th><th>&nbsp;</th></tr></thead>
+      <tbody data-reorder-url="/admin/<%= entity.key %>/views/filters/reorder">
+        <% if (filterIncluded.length === 0) { %>
+          <tr><td colspan="4" class="empty-row">No filters configured yet.</td></tr>
+        <% } %>
+        <% filterIncluded.forEach(function(f){ %>
+        <tr data-item-id="<%= f.name %>">
+          <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+          <td><strong><%= f.label %></strong> <code style="font-size:10px;color:#999;"><%= f.name %></code></td>
+          <td><%= f.type %></td>
+          <td>
+            <form method="POST" action="/admin/<%= entity.key %>/views/filters/<%= f.name %>/remove" style="display:inline">
+              <button class="btn btn-mini btn-danger" type="submit">Remove</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if (filterExcluded.length > 0) { %>
+  <p class="admin-help">Eligible fields not currently offered as filters:</p>
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Field</th><th>Type</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% filterExcluded.forEach(function(f, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><strong><%= f.label %></strong> <code style="font-size:10px;color:#999;"><%= f.name %></code></td>
+          <td><%= f.type %></td>
+          <td>
+            <form method="POST" action="/admin/<%= entity.key %>/views/filters/<%= f.name %>/add" style="display:inline">
+              <button class="btn btn-mini" type="submit">Add as Filter</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+  <% } else if (filterIncluded.length === 0) { %>
+  <p class="admin-help">No checkbox, dropdown, lookup, or date fields on this table yet to offer as filters.</p>
+  <% } %>
+
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Child Applets</span></div>
+  <p class="admin-help">Which related-record tables show up on a <strong><%= entity.label %></strong> detail page, and in what order. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder. Includes both direct links and "grandchild" tables reached two hops away. The same table can be added more than once with a different filter each time (e.g. "Active Tenants" and "Inactive Tenants" as separate boxes) &mdash; give each a custom label so they're distinguishable.</p>
+  <div class="list-table-wrap">
+    <table class="list-table reorderable">
+      <thead><tr><th style="width:32px"></th><th>Label</th><th>Predefined Filter</th><th>&nbsp;</th></tr></thead>
+      <tbody data-reorder-url="/admin/<%= entity.key %>/views/applets/reorder">
+        <% if (shownApplets.length === 0) { %>
+          <tr><td colspan="4" class="empty-row">No child applets shown on this table's detail page.</td></tr>
+        <% } %>
+        <% shownApplets.forEach(function(sa){ %>
+        <tr data-item-id="<%= sa.setting.instanceKey %>">
+          <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+          <td>
+            <form method="POST" action="/admin/<%= entity.key %>/views/applets/filter" style="display:flex;gap:6px;align-items:center;">
+              <input type="hidden" name="instanceKey" value="<%= sa.setting.instanceKey %>">
+              <input type="hidden" name="filterField" value="<%= sa.setting.filterField %>">
+              <input type="hidden" name="filterValue" value="<%= sa.setting.filterValue %>">
+              <input type="hidden" name="filterFrom" value="<%= sa.setting.filterFrom %>">
+              <input type="hidden" name="filterTo" value="<%= sa.setting.filterTo %>">
+              <input type="text" name="label" value="<%= sa.setting.label %>" placeholder="<%= sa.applet.label %>" style="width:160px" title="Custom label &mdash; leave blank to use the default">
+              <button class="btn btn-mini" type="submit">Save</button>
+            </form>
+            <p class="admin-hint" style="margin:2px 0 0 0;"><%= sa.applet.label %></p>
+          </td>
+          <td>
+            <form method="POST" action="/admin/<%= entity.key %>/views/applets/filter" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input type="hidden" name="instanceKey" value="<%= sa.setting.instanceKey %>">
+              <input type="hidden" name="label" value="<%= sa.setting.label %>">
+              <select name="filterField" onchange="this.form.submit()">
+                <option value="">&mdash; no filter &mdash;</option>
+                <% sa.eligibleFields.forEach(function(f){ %>
+                  <option value="<%= f.name %>" <%= sa.setting.filterField === f.name ? 'selected' : '' %>><%= f.label %> (<%= f.type %>)</option>
+                <% }); %>
+              </select>
+              <% if (sa.setting.filterField && sa.valueField) { %>
+                <% var vkind = filterKindFor(sa.valueField); %>
+                <% if (vkind === 'exact' && sa.valueField.type === 'bool') { %>
+                  <select name="filterValue">
+                    <option value="">&mdash; value &mdash;</option>
+                    <option value="true" <%= sa.setting.filterValue==='true' ? 'selected' : '' %>>Yes</option>
+                    <option value="false" <%= sa.setting.filterValue==='false' ? 'selected' : '' %>>No</option>
+                  </select>
+                <% } else if (vkind === 'exact' && sa.valueField.type === 'picklist') { %>
+                  <select name="filterValue">
+                    <option value="">&mdash; value &mdash;</option>
+                    <% (sa.valueOptions || []).forEach(function(opt){ %>
+                      <option value="<%= opt %>" <%= sa.setting.filterValue===opt ? 'selected' : '' %>><%= opt %></option>
+                    <% }); %>
+                  </select>
+                <% } else if (vkind === 'exact' && sa.valueField.type === 'fk') { %>
+                  <select name="filterValue">
+                    <option value="">&mdash; value &mdash;</option>
+                    <% (sa.valueOptions || []).forEach(function(opt){ %>
+                      <option value="<%= opt.value %>" <%= sa.setting.filterValue===String(opt.value) ? 'selected' : '' %>><%= opt.label %></option>
+                    <% }); %>
+                  </select>
+                <% } else if (vkind === 'exact') { %>
+                  <input type="text" name="filterValue" value="<%= sa.setting.filterValue || '' %>" placeholder="Exact match&hellip;" style="width:140px">
+                <% } else if (vkind === 'date-range') { %>
+                  <span class="filter-date-range">
+                    <input type="date" name="filterFrom" value="<%= sa.setting.filterFrom || '' %>" title="From">
+                    &ndash;
+                    <input type="date" name="filterTo" value="<%= sa.setting.filterTo || '' %>" title="To">
+                  </span>
+                <% } else if (vkind === 'number-range') { %>
+                  <span class="filter-date-range">
+                    <input type="number" step="any" name="filterFrom" value="<%= sa.setting.filterFrom || '' %>" title="Min" placeholder="Min" style="width:72px">
+                    &ndash;
+                    <input type="number" step="any" name="filterTo" value="<%= sa.setting.filterTo || '' %>" title="Max" placeholder="Max" style="width:72px">
+                  </span>
+                <% } %>
+                <button class="btn btn-mini" type="submit">Save</button>
+              <% } %>
+            </form>
+          </td>
+          <td>
+            <form method="POST" action="/admin/<%= entity.key %>/views/applets/remove" style="display:inline">
+              <input type="hidden" name="instanceKey" value="<%= sa.setting.instanceKey %>">
+              <button class="btn btn-mini btn-danger" type="submit">Remove</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if (availableApplets.length > 0) { %>
+  <p class="admin-help">Available applets &mdash; click Add any time, including more than once for a differently-filtered copy:</p>
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Applet</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% availableApplets.forEach(function(a, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><%= a.label %></td>
+          <td>
+            <form method="POST" action="/admin/<%= entity.key %>/views/applets/add" style="display:inline">
+              <input type="hidden" name="baseKey" value="<%= a.appletKey %>">
+              <button class="btn btn-mini" type="submit">Add</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+  <% } %>
+</div>
+
+<%- include('../partials/foot') %>

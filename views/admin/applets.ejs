@@ -1,0 +1,48 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'applets' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Applets</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/applets/new">+ New Applet</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <p class="admin-help">
+    An Applet is a reusable list or detail definition bound to one table — build it once here, then place it
+    into any number of <a href="/admin/views">Views</a>. This is the building block for master-detail screens
+    (e.g. a Landlords list above, a GST Registrations list below that reacts to whichever landlord is selected).
+  </p>
+
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Applet</th><th>Type</th><th>Base Table</th><th>Columns</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% if (applets.length === 0) { %>
+          <tr><td colspan="5" class="empty-row">No applets yet &mdash; click "+ New Applet" to build one.</td></tr>
+        <% } %>
+        <% applets.forEach(function(a, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><strong><%= a.label %></strong></td>
+          <td><%= a.type === 'detail' ? 'Detail' : 'List' %></td>
+          <td><code><%= a.baseTable %></code></td>
+          <td><%= a.type === 'list' ? (a.columns || []).length + ' column(s)' : '\u2014' %></td>
+          <td class="nowrap">
+            <a class="btn btn-mini" href="/admin/applets/<%= a.key %>/edit">Edit</a>
+            <form method="POST" action="/admin/applets/<%= a.key %>/delete" style="display:inline" onsubmit="return confirm('Delete this applet? This cannot be undone.');">
+              <button class="btn btn-mini btn-danger" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

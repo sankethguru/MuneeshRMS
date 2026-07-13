@@ -23,7 +23,7 @@
       <% } else { %>
         <td>&mdash;</td>
       <% } %>
-      <td><strong><%= e.label %></strong></td>
+      <td><strong><%= e.label %></strong> <% if (e.inAdmin) { %><span class="admin-hint" style="background:#e8e4d8;padding:1px 6px;border-radius:3px;">in Admin</span><% } %></td>
       <td><code><%= e.key %></code></td>
       <td><code><%= e.pk %></code></td>
       <td><%= row.count %></td>
@@ -32,7 +32,7 @@
           <form method="POST" action="/admin/nav/<%= e.key %>/remove" style="display:inline">
             <button class="btn btn-mini" type="submit" title="Hide from the main tab bar">Remove from Nav</button>
           </form>
-        <% } else { %>
+        <% } else if (!e.inAdmin) { %>
           <form method="POST" action="/admin/nav/<%= e.key %>/add" style="display:inline">
             <button class="btn btn-mini" type="submit" title="Show as a main screen tab">+ Add to Nav</button>
           </form>
@@ -46,6 +46,15 @@
         <a class="btn btn-mini" href="/admin/<%= e.key %>/export-schema.csv" title="Blank template (header row only)">Export Template</a>
         <a class="btn btn-mini" href="/admin/<%= e.key %>/export.csv" title="All existing rows">Export Data</a>
         <a class="btn btn-mini" href="/admin/<%= e.key %>/import">Import CSV</a>
+        <% if (e.inAdmin) { %>
+          <form method="POST" action="/admin/<%= e.key %>/move-out-of-admin" style="display:inline">
+            <button class="btn btn-mini" type="submit" title="Move back to the main nav, no longer admin-only">Move out of Admin</button>
+          </form>
+        <% } else { %>
+          <form method="POST" action="/admin/<%= e.key %>/move-to-admin" style="display:inline">
+            <button class="btn btn-mini" type="submit" title="Move into Admin's own subnav, admin-only access">Move into Admin</button>
+          </form>
+        <% } %>
         <form method="POST" action="/admin/<%= e.key %>/delete" style="display:inline" onsubmit="return confirm('Delete table &quot;<%= e.label %>&quot; and ALL its data? This cannot be undone.');">
           <button class="btn btn-mini btn-danger" type="submit" <%= row.referenced ? 'disabled title="Other tables link to this one \u2014 repoint or remove those fields first"' : '' %>>Delete</button>
         </form>
