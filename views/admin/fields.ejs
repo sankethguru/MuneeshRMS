@@ -59,6 +59,11 @@
                     <option value="<%= t.key %>" <%= f.ref===t.key ? 'selected' : '' %>><%= t.label %></option>
                   <% }); %>
                 </select>
+                <label style="flex-basis:100%">Constrain options — WHERE (optional) <input type="text" form="save-<%= f.name %>" name="fkWhere" value="<%= f.fkWhere || '' %>" placeholder="e.g. LL_Code != LL_GroupRoot   —or—   T_Active = true AND T_MappedTo = parent.T_MappedTo" style="width:520px"></label>
+                <label style="flex-basis:100%; margin-top:4px;">
+                  <input type="checkbox" form="save-<%= f.name %>" name="fkBulkLink" value="on" <%= f.fkBulkLink ? 'checked' : '' %>>
+                  Show a "Link Matching <%= entity.label %>" button on the referenced record's page — bulk-links every unlinked row here that matches the WHERE condition above. Only useful with a WHERE condition set.
+                </label>
               </span>
               <span id="cfg-rows-<%= f.name %>" class="field-config" style="<%= f.type === 'textarea' ? '' : 'display:none' %>">
                 <input type="number" form="save-<%= f.name %>" name="rows" min="1" max="20" value="<%= f.rows || 2 %>" style="width:52px" title="Text box height (rows)"> rows
@@ -113,7 +118,18 @@
                   </select>
                 </label>
                 <span id="cfg-picklist-custom-<%= f.name %>" style="<%= f.picklistSource === 'global' ? 'display:none' : '' %>">
-                  <input type="text" form="save-<%= f.name %>" name="options" value="<%= f.options || '' %>" placeholder="e.g. Active,Inactive,Pending" style="width:220px">
+                  <div id="pv-rows-<%= f.name %>" class="picklist-rows-inline">
+                    <% (f.picklistValues || []).forEach(function(v, idx){ %>
+                      <span class="pv-row">
+                        <input type="hidden" form="save-<%= f.name %>" name="picklistValues[<%= idx %>][key]" value="<%= v.key %>">
+                        <input type="text" form="save-<%= f.name %>" name="picklistValues[<%= idx %>][label]" value="<%= v.label %>" placeholder="option" style="width:110px">
+                        <input type="hidden" form="save-<%= f.name %>" name="picklistValues[<%= idx %>][active]" value="off">
+                        <input type="checkbox" form="save-<%= f.name %>" name="picklistValues[<%= idx %>][active]" value="on" <%= v.active !== false ? 'checked' : '' %> title="Active">
+                        <button class="btn btn-mini btn-danger" type="button" onclick="this.closest('.pv-row').remove()" title="Remove">&times;</button>
+                      </span>
+                    <% }); %>
+                  </div>
+                  <button class="btn btn-mini" type="button" onclick="mlAddPicklistValueRow('<%= f.name %>')">+ Option</button>
                 </span>
                 <span id="cfg-picklist-global-<%= f.name %>" style="<%= f.picklistSource === 'global' ? '' : 'display:none' %>">
                   <select form="save-<%= f.name %>" name="picklistKey" style="width:160px">
@@ -203,6 +219,7 @@
             <option value="">&mdash; choose a table &mdash;</option>
             <% fkTargets.forEach(function(t){ %><option value="<%= t.key %>"><%= t.label %></option><% }); %>
           </select>
+          <div style="margin-top:6px">Constrain options — WHERE (optional) <input type="text" name="fkWhere" placeholder="e.g. LL_Code != LL_GroupRoot   —or—   T_Active = true AND T_MappedTo = parent.SomeLandlordField" style="width:520px"></div>
         </div>
       </div>
       <div class="field-row" id="newFieldRowsRow" style="display:none">
@@ -227,7 +244,7 @@
       </div>
       <div class="field-row" id="newFieldOptionsRow" style="display:none">
         <label class="field-label">Options (comma-separated)</label>
-        <div class="field-value"><input type="text" name="options" placeholder="e.g. Active,Inactive,Pending"></div>
+        <div class="field-value"><input type="text" name="newOptionsCsv" placeholder="e.g. Active,Inactive,Pending"><p class="admin-hint" style="margin:2px 0 0;">You can rename or reorder these anytime later without breaking existing records — each option gets a stable internal key separate from what you type here.</p></div>
       </div>
       <div class="field-row" id="newFieldSeriesRow" style="display:none">
         <label class="field-label">Series Config</label>
@@ -302,6 +319,22 @@
 </div>
 
 <script>
+  var mlPickValCounters = {};
+  function mlAddPicklistValueRow(fieldName) {
+    var container = document.getElementById('pv-rows-' + fieldName);
+    if (!container) return;
+    if (mlPickValCounters[fieldName] === undefined) mlPickValCounters[fieldName] = container.querySelectorAll('.pv-row').length;
+    var idx = mlPickValCounters[fieldName]++;
+    var span = document.createElement('span');
+    span.className = 'pv-row';
+    span.innerHTML =
+      '<input type="hidden" form="save-' + fieldName + '" name="picklistValues[' + idx + '][key]" value="">' +
+      '<input type="text" form="save-' + fieldName + '" name="picklistValues[' + idx + '][label]" placeholder="option" style="width:110px">' +
+      '<input type="hidden" form="save-' + fieldName + '" name="picklistValues[' + idx + '][active]" value="off">' +
+      '<input type="checkbox" form="save-' + fieldName + '" name="picklistValues[' + idx + '][active]" value="on" checked title="Active">' +
+      '<button class="btn btn-mini btn-danger" type="button" onclick="this.closest(\'.pv-row\').remove()" title="Remove">&times;</button>';
+    container.appendChild(span);
+  }
   function mlToggleFieldConfig(name, type) {
     var isComputedOrLayout = ['formula', 'rollup', 'series', 'spacer', 'section'].includes(type);
     var showMap = { ref: type === 'fk', rows: type === 'textarea', formula: type === 'formula', options: type === 'picklist', series: type === 'series', rollup: type === 'rollup', 'readonly-default': !isComputedOrLayout };

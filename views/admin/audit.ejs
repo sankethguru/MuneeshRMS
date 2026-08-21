@@ -14,13 +14,13 @@
         <% if (entries.length === 0) { %>
           <tr><td colspan="6" class="empty-row">No audited activity yet. Enable Audit Trail on a table under its Settings.</td></tr>
         <% } %>
-        <% entries.forEach(function(e, i){ var ent = entities[e.entity]; %>
+        <% entries.forEach(function(e, i){ var isSchemaChange = String(e.entity).startsWith('schema:'); var realEntityKey = isSchemaChange ? e.entity.slice(7) : e.entity; var ent = entities[realEntityKey]; %>
         <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
           <td class="nowrap"><%
             /* audit ts looks like 2026-07-04T14:03:22.123Z — reformat to DD-MM-YYYY HH:MM:SS */
             var ds = e.ts.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
           %><%= ds ? (ds[3] + '-' + ds[2] + '-' + ds[1] + ' ' + ds[4] + ':' + ds[5] + ':' + ds[6]) : e.ts.replace('T', ' ').slice(0, 19) %></td>
-          <td><%= ent ? ent.label : e.entity %></td>
+          <td><%= ent ? ent.label : realEntityKey %><%= isSchemaChange ? ' — field' : '' %></td>
           <td><code><%= e.recordId %></code></td>
           <td>
             <% if (e.action === 'create') { %><span class="bool-flag bool-yes">NEW</span>

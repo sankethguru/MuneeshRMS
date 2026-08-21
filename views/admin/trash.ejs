@@ -1,0 +1,44 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title"><%= entity.label %> &mdash; Trash</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/<%= entity.key %>">&larr; Back to <%= entity.label %></a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <p class="admin-help">Deleted records are kept here for 30 days before being permanently removed automatically, in case a delete was a mistake.</p>
+
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Record</th><th>Deleted</th><th>By</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% if (rows.length === 0) { %>
+          <tr><td colspan="4" class="empty-row">Nothing in the Trash for this table.</td></tr>
+        <% } %>
+        <% rows.forEach(function(r, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><%= display(entity, r) %> <span class="admin-hint">(<%= r[entity.pk] %>)</span></td>
+          <td><%= (r.__deletedAt || '').slice(0, 10) %></td>
+          <td><%= r.__deletedBy || '\u2014' %></td>
+          <td class="nowrap">
+            <form method="POST" action="/admin/<%= entity.key %>/trash/<%= encodeURIComponent(r[entity.pk]) %>/restore" style="display:inline">
+              <button class="btn btn-mini btn-primary" type="submit">Restore</button>
+            </form>
+            <form method="POST" action="/admin/<%= entity.key %>/trash/<%= encodeURIComponent(r[entity.pk]) %>/purge" style="display:inline" onsubmit="return confirm('Permanently delete this record? This cannot be undone.');">
+              <button class="btn btn-mini btn-danger" type="submit">Delete Forever</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

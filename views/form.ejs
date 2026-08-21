@@ -18,6 +18,35 @@
       <% if (!isNew && canCreate) { %>
         <a class="btn btn-toolbar" href="/<%= entity.key %>/new/form?duplicateFrom=<%= encodeURIComponent(record[entity.pk]) %>" title="Open a new record pre-filled with this one's fields">Duplicate</a>
       <% } %>
+      <% if (!isNew && typeof bulkLinkable !== 'undefined' && bulkLinkable && bulkLinkable.length) { %>
+        <% bulkLinkable.forEach(function(rel){ %>
+          <form method="POST" action="/<%= entity.key %>/<%= encodeURIComponent(record[entity.pk]) %>/link-matching/<%= rel.childEntityKey %>/<%= rel.childFieldName %>" style="display:inline" onsubmit="return confirm('Link every unlinked <%= rel.childLabel %> whose <%= rel.fieldLabel %> matches this record? This only fills in blanks — it never overwrites an existing link.');">
+            <button class="btn btn-toolbar" type="submit" title="Finds every <%= rel.childLabel %> that doesn't have its <%= rel.fieldLabel %> set yet and would match this record, and links them all at once.">Link Matching <%= rel.childLabel %></button>
+          </form>
+        <% }); %>
+      <% } %>
+      <% if (!isNew && entity.key === 'tax_worksheets') { %>
+        <%# Same fixed-table-identity reasoning as the PayQR block below:
+            the tax module owns this one table by name, so this one check
+            is the honest way to surface its computation view. %>
+        <a class="btn btn-toolbar" href="/tax/<%= encodeURIComponent(record[entity.pk]) %>">View Computation</a>
+      <% } %>
+      <% if (!isNew && entity.key === 'tax_projections') { %>
+        <a class="btn btn-toolbar" href="/tax-projections/<%= encodeURIComponent(record[entity.pk]) %>">View Projection</a>
+      <% } %>
+      <% if (!isNew && typeof billTemplate !== 'undefined' && billTemplate) { %>
+        <form method="POST" action="/<%= entity.key %>/<%= encodeURIComponent(record[entity.pk]) %>/generate-pdf" style="display:inline">
+          <button class="btn btn-toolbar" type="submit"><%= pdfGeneratedAt ? 'Re-generate PDF' : 'Generate PDF' %></button>
+        </form>
+        <% if (pdfGeneratedAt) { %>
+          <a class="btn btn-toolbar" href="/<%= entity.key %>/<%= encodeURIComponent(record[entity.pk]) %>/pdf" target="_blank" title="Generated <%= pdfGeneratedAt.slice(0,10) %>">View PDF</a>
+        <% } %>
+      <% } %>
+      <% if (!isNew && typeof canEmail !== 'undefined' && canEmail && typeof emailTemplates !== 'undefined' && emailTemplates && emailTemplates.length) { %>
+        <% emailTemplates.forEach(function(et){ %>
+          <button type="button" class="btn btn-toolbar" onclick="mlEmailCompose('<%= entity.key %>','<%= encodeURIComponent(record[entity.pk]) %>','<%= et.key %>')" title="Compose &amp; send this email">&#9993; <%= et.label %></button>
+        <% }); %>
+      <% } %>
       <% if (!isNew && canDelete) { %>
         <form method="POST" action="/<%= entity.key %>/<%= encodeURIComponent(record[entity.pk]) %>/delete" onsubmit="return confirm('Delete this record permanently?');" style="display:inline">
           <button class="btn btn-toolbar btn-danger" type="submit">Delete</button>
@@ -27,6 +56,19 @@
   </div>
 
   <% if (error) { %><div class="admin-notice err" style="margin:0 0 12px 0;"><%= error %></div><% } %>
+  <% if (typeof notice !== 'undefined' && notice) { %><div class="admin-notice ok" style="margin:0 0 12px 0;"><%= notice %></div><% } %>
+  <% if (typeof isSoftDeleted !== 'undefined' && isSoftDeleted) { %>
+    <div class="format-warning">
+      <span class="warn-icon">&#9888;</span>
+      <span class="warn-text">
+        This record is in the Trash (deleted <%= deletedBy ? 'by ' + deletedBy : '' %> on <%= deletedAt ? deletedAt.slice(0,10) : '' %>) &mdash;
+        it won't appear in the normal list, and it'll be permanently removed automatically after 30 days.
+        <form method="POST" action="/admin/<%= entity.key %>/trash/<%= encodeURIComponent(record[entity.pk]) %>/restore" style="display:inline;">
+          <button class="btn btn-mini btn-primary" type="submit">Restore</button>
+        </form>
+      </span>
+    </div>
+  <% } %>
 
   <form class="detail-form" method="POST" action="<%= isNew ? '/' + entity.key : '/' + entity.key + '/' + encodeURIComponent(record[entity.pk]) %>" enctype="multipart/form-data">
     <div class="field-grid">
@@ -59,21 +101,22 @@
             <% } else if (f.type === 'series') { %>
               <input type="text" class="formula-display" value="<%= isNew ? '(assigned on save)' : val %>" readonly title="Auto-numbered series">
             <% } else if (f.type === 'picklist') { %>
-              <% var pd = picklistFieldData[f.name] || { options: picklistOptions(f), constrainedBy: null, allOptionsWithConstraint: [] }; %>
+              <% var pd = picklistFieldData[f.name] || { options: [], constrainedBy: null, allOptionsWithConstraint: [] }; %>
               <select id="fld_<%= f.name %>" name="<%= f.name %>" <%= pd.constrainedBy ? 'data-constrained-by="fld_' + pd.constrainedBy + '"' : '' %> <%= isLocked ? 'disabled' : '' %>>
                 <option value="">&mdash; none &mdash;</option>
                 <% if (pd.constrainedBy) { %>
                   <% pd.allOptionsWithConstraint.forEach(function(opt){ %>
-                    <option value="<%= opt.value %>" data-constraint="<%= opt.constraintValue %>" <%= (String(val) === opt.value) ? 'selected' : '' %> <%= pd.options.includes(opt.value) ? '' : 'style="display:none"' %>><%= opt.value %></option>
+                    <option value="<%= opt.key %>" data-constraint="<%= opt.constraintValue %>" <%= (String(val) === opt.key) ? 'selected' : '' %> <%= pd.options.some(function(o){ return o.key === opt.key; }) ? '' : 'style="display:none"' %>><%= opt.label %></option>
                   <% }); %>
                 <% } else { %>
                   <% pd.options.forEach(function(opt){ %>
-                    <option value="<%= opt %>" <%= (String(val) === opt) ? 'selected' : '' %>><%= opt %></option>
+                    <option value="<%= opt.key %>" <%= (String(val) === opt.key) ? 'selected' : '' %>><%= opt.label %></option>
                   <% }); %>
                 <% } %>
               </select>
             <% } else if (f.type === 'fk') { %>
-              <select id="fld_<%= f.name %>" name="<%= f.name %>" <%= isLocked ? 'disabled' : '' %>>
+              <% var fkDeps = (typeof fkWhereParentRefs === 'function') ? fkWhereParentRefs(f.fkWhere) : []; %>
+              <select id="fld_<%= f.name %>" name="<%= f.name %>" data-fk-entity="<%= entity.key %>" data-fk-field="<%= f.name %>" <%= fkDeps.length ? 'data-fk-depends="' + fkDeps.join(',') + '"' : '' %> <%= isLocked ? 'disabled' : '' %>>
                 <option value="">&mdash; none &mdash;</option>
                 <% (fkOptions[f.name] || []).forEach(function(opt){ %>
                   <option value="<%= opt.value %>" <%= (String(val) === String(opt.value)) ? 'selected' : '' %>><%= opt.label %></option>
@@ -111,11 +154,26 @@
                   <% } %>
                 <% } %>
               </div>
+            <% } else if (f.type === 'file') { %>
+              <div class="file-field">
+                <% if (val) { %>
+                  <a href="/uploads/<%= entity.key %>/<%= f.name %>/<%= val %>" target="_blank" class="file-link">&#128206; <%= val %></a>
+                <% } %>
+                <% if (!isLocked) { %>
+                  <input type="file" id="fld_<%= f.name %>" name="file_<%= f.name %>">
+                  <% if (val) { %>
+                    <label class="image-clear"><input type="checkbox" name="__clear_<%= f.name %>"> Remove file</label>
+                  <% } %>
+                <% } %>
+              </div>
             <% } else { %>
               <input type="text" id="fld_<%= f.name %>" name="<%= f.name %>" value="<%= val %>" <%= isLocked ? 'readonly' : '' %> <%= f.required ? 'required' : '' %>>
             <% } %>
             <% if (f.hint) { %>
               <p class="field-hint <%= f.hintImportant ? 'field-hint-important' : '' %>"><%- renderHintHtml(f.hint) %></p>
+            <% } %>
+            <% if (typeof fieldErrors !== 'undefined' && fieldErrors && fieldErrors[f.name]) { %>
+              <p class="field-hint field-hint-important" style="color:#a13c3c;"><%= fieldErrors[f.name] %></p>
             <% } %>
           </div>
         </div>
@@ -131,6 +189,26 @@
     <p class="admin-hint" style="display:block;padding:10px 4px;">You have read-only access to this table.</p>
     <% } %>
   </form>
+</div>
+
+<!-- Email compose / preview modal (populated by mlEmailCompose in app.js) -->
+<div id="mlEmailModal" class="ml-email-modal" style="display:none;">
+  <div class="ml-email-dialog">
+    <div class="ml-email-head"><strong id="mlEmailTitle">Send email</strong><button type="button" class="btn btn-mini" onclick="mlEmailClose()">&times;</button></div>
+    <div id="mlEmailBanner" class="admin-notice err" style="display:none;margin:0 0 8px 0;"></div>
+    <label class="ml-email-lbl">To <input type="text" id="mlEmailTo"></label>
+    <label class="ml-email-lbl">Cc <input type="text" id="mlEmailCc"></label>
+    <label class="ml-email-lbl">Bcc <input type="text" id="mlEmailBcc"></label>
+    <label class="ml-email-lbl">Subject <input type="text" id="mlEmailSubject"></label>
+    <label class="ml-email-lbl">Body (HTML) <textarea id="mlEmailBody" rows="9" oninput="mlEmailSyncPreview()"></textarea></label>
+    <div class="ml-email-lbl-sm">Preview</div>
+    <div id="mlEmailPreview" class="ml-email-preview"></div>
+    <div id="mlEmailStatus" class="ml-email-status"></div>
+    <div class="ml-email-actions">
+      <button type="button" class="btn" onclick="mlEmailClose()">Cancel</button>
+      <button type="button" class="btn btn-primary" id="mlEmailSendBtn" onclick="mlEmailSend()">Send</button>
+    </div>
+  </div>
 </div>
 
 <% /* Payment records: show a scannable UPI QR right on the detail page. Generated

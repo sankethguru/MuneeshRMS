@@ -1,6 +1,9 @@
+<% if (typeof isAdminPage !== 'undefined' && isAdminPage) { %></div></div><% } %>
+  </div>
+</div>
 <div class="statusbar">
-  <span>Connected: Muneesh Legacy Enterprise Server</span>
-  <span>Session User: Administrator</span>
+  <span>Connected: Muneesh Legacy Enterprise Server v<%= typeof appVersion !== 'undefined' ? appVersion : '?' %></span>
+  <% if (typeof currentUser !== 'undefined' && currentUser) { %><span>Session User: <%= currentUser.username %><%= currentUser.isAdmin ? ' (Admin)' : '' %></span><% } %>
 </div>
 <script src="/js/sortable.min.js"></script>
 <script src="/js/app.js"></script>

@@ -5,7 +5,49 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title><%= typeof pageTitle !== 'undefined' ? pageTitle : 'Muneesh Legacy' %></title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script>
+  /* Apply the saved theme to <html> before the stylesheet paints, so the
+     chosen theme is in effect from the first frame (no flash of the other
+     theme). Default (no attribute) is the Siebel-classic theme. */
+  try {
+    var t = localStorage.getItem('ml-theme');
+    if (t === 'salesforce' || t === 'coral' || t === 'custom') document.documentElement.setAttribute('data-theme', t);
+    if (t === 'custom') {
+      var ct = JSON.parse(localStorage.getItem('ml-custom-theme') || 'null');
+      if (ct) {
+        // Tiny RGB-channel darken/lighten, kept identical to mlDarken/
+        // mlLighten in app.js (which loads later) so the derived gradient
+        // shades never mismatch between this pre-paint pass and any
+        // later re-application from the Themes page itself.
+        var hx2rgb = function (h) { h = (h || '#888888').replace('#', ''); if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join(''); return { r: parseInt(h.substr(0, 2), 16), g: parseInt(h.substr(2, 2), 16), b: parseInt(h.substr(4, 2), 16) }; };
+        var rgb2hx = function (r, g, b) { var f = function (n) { return Math.round(Math.max(0, Math.min(255, n))).toString(16).padStart(2, '0'); }; return '#' + f(r) + f(g) + f(b); };
+        var dk = function (hex, pct) { var c = hx2rgb(hex), f = 1 - pct / 100; return rgb2hx(c.r * f, c.g * f, c.b * f); };
+        var lt = function (hex, pct) { var c = hx2rgb(hex), f = pct / 100; return rgb2hx(c.r + (255 - c.r) * f, c.g + (255 - c.g) * f, c.b + (255 - c.b) * f); };
+        var rules = [];
+        if (ct.pageBg) { rules.push('--chrome-bg:' + ct.pageBg + ';'); rules.push('--chrome-bg-dark:' + dk(ct.pageBg, 8) + ';'); }
+        if (ct.cardBg) { rules.push('--panel-bg:' + ct.cardBg + ';'); rules.push('--white:' + ct.cardBg + ';'); }
+        if (ct.header) { rules.push('--navy-1:' + ct.header + ';'); rules.push('--navy-2:' + dk(ct.header, 12) + ';'); rules.push('--navy-3:' + dk(ct.header, 8) + ';'); }
+        if (ct.accent) { rules.push('--gold:' + ct.accent + ';'); rules.push('--gold-light:' + lt(ct.accent, 15) + ';'); rules.push('--link:' + ct.accent + ';'); }
+        if (ct.text) { rules.push('--ink:' + ct.text + ';'); rules.push('--ink-soft:' + lt(ct.text, 25) + ';'); }
+        if (ct.border) rules.push('--border-dark:' + ct.border + ';');
+        var fontRules = [];
+        if (ct.displayFont) fontRules.push('.masthead-brand .brand-name, .applet-title, .home-kpi-value{font-family:"' + ct.displayFont + '",serif !important;}');
+        if (ct.bodyFont) fontRules.push('body,.btn,.list-table,.field-value input{font-family:"' + ct.bodyFont + '",sans-serif !important;}');
+        var s = document.createElement('style');
+        s.id = 'ml-custom-theme-vars';
+        s.textContent = 'html[data-theme="custom"]{' + rules.join(' ') + '} ' + fontRules.join(' ');
+        document.head.appendChild(s);
+        if (ct.fontUrl) {
+          var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = ct.fontUrl; document.head.appendChild(l);
+        }
+      }
+    }
+  } catch (e) {}
+</script>
 <link rel="stylesheet" href="/css/style.css">
 </head>
 <body<% if (typeof sessionTimeoutMinutes !== 'undefined' && sessionTimeoutMinutes) { %> data-idle-timeout-minutes="<%= sessionTimeoutMinutes %>"<% } %>>
+<script>
+  try { if (localStorage.getItem('ml-sidebar-collapsed') === '1') document.body.classList.add('sidebar-collapsed'); } catch (e) {}
+</script>

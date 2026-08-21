@@ -1,0 +1,242 @@
+  <div style="padding: 16px 20px;">
+
+    <p class="admin-help">
+      Two related but distinct languages are documented on this page. Most of it is the expression language
+      used everywhere a formula is accepted: <strong>formula</strong> fields, <strong>rollup</strong> WHERE
+      clauses, and <strong>Report</strong> columns/conditions/group-by/aggregates. Near the bottom is a
+      separate, simpler tag syntax used only inside <strong>Template Library</strong> documents (bill/invoice
+      PDFs) &mdash; clearly marked where it starts. Examples below use a fictional <code>orders</code> /
+      <code>customers</code> pair of tables &mdash; not any table actually in this installation &mdash; so they
+      read as reference material rather than implying these exact names are special. If you're new to this app
+      and looking for a plain-language walkthrough of actually using it instead, see
+      <a href="/admin/help?view=getting-started">Getting Started</a>.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Referencing Fields</span></div>
+    <table class="list-table prose">
+      <thead><tr><th style="width:220px">Syntax</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>ORD_Amount</code></td><td>A bare field name on the table the formula lives on.</td></tr>
+        <tr class="row-odd"><td><code>customers.CUST_Name</code></td><td>Follows a foreign-key field from this table to <code>customers</code>, then reads <code>CUST_Name</code> there. Works when the table name (<code>customers</code>) matches the fk's target table.</td></tr>
+        <tr class="row-even"><td><code>ORD_Customer.CUST_Name</code></td><td>Same cross-table lookup, but naming the fk <em>field</em> (<code>ORD_Customer</code>) instead of its target table. Useful if a table has more than one fk pointing at the same target and you need to say which one.</td></tr>
+        <tr class="row-odd"><td><code>ORD_Customer.CUST_MappedTo.LL_Display</code></td><td>Any number of hops chained together, not just one &mdash; this example reads a Landlord's name starting from an Order, by way of its Customer. Formula/rollup fields resolve correctly at any hop along the way too, not just plain stored fields.</td></tr>
+        <tr class="row-even"><td><code>parent.CUST_CreditLimit</code></td><td>Inside a rollup's WHERE clause only &mdash; refers back to the record the rollup itself lives on (see Rollup WHERE below).</td></tr>
+      </tbody>
+    </table>
+    <p class="admin-help">A typo anywhere in a chain (a table/fk name that doesn't exist, or a final field name that doesn't) fails loudly &mdash; e.g. <code>#REF: no such field "CUST_Nam" on customers</code> &mdash; rather than silently returning blank, no matter how many hops deep the mistake is.</p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Logic</span></div>
+    <table class="list-table prose">
+      <thead><tr><th style="width:220px">Function</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr class="row-even">
+          <td><code>IF(cond, a, b)</code></td>
+          <td><code>IF(ORD_Amount &gt; 10000, "Large Order", "Standard")</code></td>
+          <td>Write <code>=</code> for equality (e.g. <code>ORD_Status = "Paid"</code>) &mdash; it's converted to strict equality automatically. Infix <code>AND</code> / <code>OR</code> / <code>NOT</code> work as keywords.</td>
+        </tr>
+        <tr class="row-odd">
+          <td><code>IFERROR(val, fallback)</code></td>
+          <td><code>IFERROR(ORD_Amount / ORD_ItemCount, 0)</code></td>
+          <td>Catches <code>#ERR</code> (or a NaN result, e.g. from dividing by a blank) and substitutes <code>fallback</code> instead.</td>
+        </tr>
+        <tr class="row-even">
+          <td><code>ISBLANK(v)</code></td>
+          <td><code>IF(ISBLANK(ORD_Notes), "No notes", ORD_Notes)</code></td>
+          <td>True for an empty string, <code>undefined</code>, or <code>null</code>.</td>
+        </tr>
+        <tr class="row-odd">
+          <td><strong>Booleans</strong></td>
+          <td><code>ORD_Paid = true</code> &middot; <code>ORD_Paid = TRUE</code> &middot; <code>NOT ORD_Paid</code></td>
+          <td>Use the literals <code>true</code> / <code>false</code> &mdash; upper, lower or mixed case all work (<code>TRUE</code>, <code>False</code>, &hellip;). Because <code>=</code> is <em>strict</em>, don't compare a checkbox field to <code>1</code>/<code>0</code> or to the text <code>"true"</code> &mdash; those never match. A bare boolean field (<code>ORD_Paid</code>) or its negation (<code>NOT ORD_Paid</code>) also works as a plain true/false test.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Math</span></div>
+    <table class="list-table prose">
+      <thead><tr><th style="width:220px">Function</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>ROUND(n, d)</code></td><td><code>ROUND(ORD_Amount * 0.18, 2)</code></td><td>Rounds to <code>d</code> decimal places, standard rounding.</td></tr>
+        <tr class="row-odd"><td><code>ROUNDUP(n, d)</code></td><td><code>ROUNDUP(ORD_Amount / 3, 0)</code></td><td>Always rounds away from zero.</td></tr>
+        <tr class="row-even"><td><code>ROUNDDOWN(n, d)</code></td><td><code>ROUNDDOWN(ORD_Amount / 3, 0)</code></td><td>Always rounds toward zero (truncates).</td></tr>
+        <tr class="row-odd"><td><code>ABS(n)</code></td><td><code>ABS(ORD_Amount - 5000)</code></td><td>Absolute value.</td></tr>
+        <tr class="row-even"><td><code>MIN(...)</code> / <code>MAX(...)</code></td><td><code>MIN(ORD_Amount, 10000)</code></td><td>Takes any number of arguments directly &mdash; not a cell range.</td></tr>
+        <tr class="row-odd"><td><code>SUM(...)</code></td><td><code>SUM(ORD_Amount, 500, 250)</code></td><td>Also a direct-arguments sum, for adding a field plus flat extras in one expression. (Aggregating a whole related table is what <strong>rollup</strong> fields and Report aggregates are for — see below.)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Dates</span></div>
+    <table class="list-table prose">
+      <thead><tr><th style="width:220px">Function</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>TODAY()</code></td><td><code>IF(ORD_Date = TODAY(), "Placed Today", "Earlier")</code></td><td>Returns today's date as an ISO string.</td></tr>
+        <tr class="row-odd"><td><code>YEAR(d)</code> / <code>MONTH(d)</code> / <code>DAY(d)</code></td><td><code>CONCAT(YEAR(ORD_Date), "-", MONTH(ORD_Date))</code></td><td><code>MONTH</code> is 1&ndash;12, not 0-based.</td></tr>
+        <tr class="row-even"><td><code>DAYS(d1, d2)</code></td><td><code>DAYS(TODAY(), ORD_Date)</code></td><td>Whole days between two dates (<code>d1 - d2</code>).</td></tr>
+        <tr class="row-odd"><td><code>FY(date)</code></td><td><code>FY(ORD_Date)</code> &rarr; <code>"2025-26"</code></td><td>Indian financial year label (April&ndash;March). Also accepts a literal FY string directly, e.g. <code>FY("2025-26")</code>, for comparing against a fixed year.</td></tr>
+        <tr class="row-even"><td><code>CURRENT_FY()</code></td><td><code>IF(FY(ORD_Date) = CURRENT_FY(), "This year", "Past")</code></td><td>Today's financial year.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Text</span></div>
+    <table class="list-table prose">
+      <thead><tr><th style="width:220px">Function</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>CONCAT(...)</code></td><td><code>CONCAT(customers.CUST_Name, " - ", ORD_Number)</code></td><td>Joins any number of values into one string.</td></tr>
+        <tr class="row-odd"><td><code>AMOUNT_TO_WORDS(n)</code></td><td><code>AMOUNT_TO_WORDS(I_TotalBill)</code></td><td>A Rupee amount as the standard Indian invoice wording &mdash; e.g. <code>363000</code> &rarr; "Rupees Three Lakh Sixty Three Thousand Only", <code>100.05</code> &rarr; "...and Five Paise Only". Indian numbering (crore/lakh/thousand), not the Western million/billion grouping. Used as a real formula field (e.g. <code>I_AmountInWords</code>) so a PDF template can reference it as an ordinary merge tag, same as any other field.</td></tr>
+        <tr class="row-odd"><td><code>LEFT(s, n)</code> / <code>RIGHT(s, n)</code></td><td><code>LEFT(ORD_Number, 3)</code></td><td>First/last <code>n</code> characters.</td></tr>
+        <tr class="row-even"><td><code>MID(s, start, len)</code></td><td><code>MID(ORD_Number, 4, 2)</code></td><td><code>start</code> is 1-based, like Excel.</td></tr>
+        <tr class="row-odd"><td><code>LEN(s)</code></td><td><code>IF(LEN(ORD_Notes) &gt; 100, "Long note", "")</code></td><td>Character count.</td></tr>
+        <tr class="row-even"><td><code>UPPER(s)</code> / <code>LOWER(s)</code> / <code>TRIM(s)</code></td><td><code>UPPER(customers.CUST_City)</code></td><td>Case conversion and whitespace trimming.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">LOOKUP</span></div>
+    <p class="admin-help">
+      <code>LOOKUP("table", "condition", "returnField")</code> scans every row of the named table, evaluates
+      <code>condition</code> against each one, and returns <code>returnField</code> from the single matching row.
+      Unlike a plain cross-table reference (which needs a real fk field), LOOKUP works even when there's
+      <em>no</em> direct link — e.g. matching an order's year against a separate rates table:
+    </p>
+    <p class="admin-help" style="font-family:monospace; background:#f7f6f0; padding:8px 10px; border:1px solid var(--border-dark);">
+      LOOKUP("tax_rates", "tax_rates.RATE_Year = YEAR(ORD_Date)", "RATE_Percent")
+    </p>
+    <p class="admin-help">
+      Inside the condition, the target table's own fields are reached as <code>tax_rates.FieldName</code> (same
+      dotted syntax as everywhere else); this formula's own fields are reached by bare name, same as normal.
+      Errors visibly rather than guessing: <code>#LOOKUP: no match</code>, <code>#LOOKUP: ambiguous (n rows)</code>
+      if more than one row matches, or <code>#REF: no such field "X" on tax_rates</code> if a name in the condition
+      or the return field is misspelled.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Rollup WHERE</span></div>
+    <p class="admin-help">
+      A rollup field aggregates a related table (one or two hops away) with <code>SUM/COUNT/AVG/MIN/MAX</code>
+      and an optional WHERE condition, using the same formula language — bare names refer to the row being
+      aggregated, and <code>parent.FieldName</code> refers back to the record the rollup itself lives on:
+    </p>
+    <p class="admin-help" style="font-family:monospace; background:#f7f6f0; padding:8px 10px; border:1px solid var(--border-dark);">
+      FY(ORD_Date) = CURRENT_FY() AND ORD_Amount &gt; parent.CUST_CreditLimit
+    </p>
+    <p class="admin-help">On a Customers table, a rollup with this WHERE (aggregating the related Orders) would sum only this financial year's orders that exceed that specific customer's own credit limit.</p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Series Fields (Auto-Numbering)</span></div>
+    <p class="admin-help">
+      A <strong>series</strong> field auto-assigns a number when a record is created &mdash; but instead of one
+      global counter for the whole table, it resets per <em>group</em> (e.g. a separate running sequence per
+      customer, per year, per region &mdash; whatever the group path resolves to). Three things need to be set up:
+    </p>
+    <table class="list-table prose">
+      <thead><tr><th style="width:220px">Setting</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr class="row-even">
+          <td>Group Path</td>
+          <td><code>ORD_Customer.CUST_Region</code></td>
+          <td>
+            An fk field on this table (<code>ORD_Customer</code>), then a field on whatever it points to
+            (<code>CUST_Region</code>) &mdash; and any number of further hops beyond that too, chained the same
+            way as anywhere else in the formula language (e.g. <code>ORD_Customer.CUST_MappedTo.LL_Region</code>).
+            The <em>value</em> of the final field becomes the group key &mdash; it doesn't have to be a plain
+            text field. In this example, grouping is really "by region," even though Orders only links directly
+            to Customers, because each customer's own <code>CUST_Region</code> field already holds the region's
+            identifier.
+          </td>
+        </tr>
+        <tr class="row-odd">
+          <td>Tracker Table</td>
+          <td><code>order_series</code></td>
+          <td>A separate table that holds one row per group, remembering the last number issued for that group.</td>
+        </tr>
+        <tr class="row-even">
+          <td>Tracker Group / Counter Fields</td>
+          <td><code>OS_Region</code> / <code>OS_LastNumber</code></td>
+          <td>Which field on the tracker table stores the group key, and which one stores the running count.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="admin-help">
+      With the setup above, four orders alternating between a NORTH-region customer and a SOUTH-region customer
+      number themselves <strong>1, 1, 2, 2</strong> &mdash; not 1, 2, 3, 4 &mdash; because each region keeps its
+      own independent count. The tracker table's rows are created automatically the first time a new group is
+      seen; nothing needs to be pre-populated.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Blank Fields in Arithmetic</span></div>
+    <p class="admin-help">
+      A blank <strong>number/currency/percent</strong> field behaves as <code>0</code> in <code>+ - * /</code>
+      expressions — the standard spreadsheet convention, so <code>ORD_Amount + ORD_Discount</code> still adds up
+      correctly even if <code>ORD_Discount</code> is empty on some records. This is scoped narrowly on purpose:
+      a blank <strong>text</strong> field used in <code>CONCAT</code> or displayed directly still stays blank,
+      never becomes the string <code>"0"</code>.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Bill/Document Template Tags &mdash; a Different, Related Language</span></div>
+    <p class="admin-help">
+      This one is separate from everything above &mdash; it's the tag syntax used inside a
+      <strong>Template Library</strong> document (Admin &rarr; Templates), not the formula language. Simpler
+      by design: no functions, no arithmetic &mdash; just naming which field's value goes where, since the
+      HTML/CSS around the tags is where the actual layout and design happens.
+    </p>
+    <table class="list-table prose">
+      <thead><tr><th style="width:260px">Syntax</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>{{BILLS_Total}}</code></td><td>A field on the record the document is being generated for. Formatted the same way it shows everywhere else in the app &mdash; a currency field renders as <code>&#8377;45,000.00</code>, not a raw number.</td></tr>
+        <tr class="row-odd"><td><code>{{BILLS_ClientCode.T_Client_Name}}</code></td><td>Follows a foreign-key field (<code>BILLS_ClientCode</code>) to the linked record, then reads a field there. Same idea as the formula language's cross-table references, one hop.</td></tr>
+        <tr class="row-even"><td><code>{{BILLS_ClientCode.T_MappedTo.LL_Display}}</code></td><td>Any number of hops chained together &mdash; this example reads a Landlord's name starting from a Bill, by way of its Tenant. Formula/rollup fields resolve correctly at any hop, not just plain stored fields.</td></tr>
+        <tr class="row-odd"><td><code>{{#each LineItems}}...{{/each}}</code></td><td>Repeats whatever's between the tags once per row of a configured line-items table (set up alongside the template itself). If no line-items table is configured, it repeats exactly once, over the record itself &mdash; so this tag is always safe to use even before a real line-items table exists. <strong>The <code>{{#each LineItems}}</code> and <code>{{/each}}</code> markers must actually be present around the row you want repeated</strong> &mdash; without them, a tag like <code>{{Inv}}</code> is never touched by the loop logic at all and just stays as literal, unresolved text in the output.</td></tr>
+        <tr class="row-even"><td><code>{{GeneratedAt}}</code></td><td>Today's date, resolved at the moment the document is actually generated &mdash; useful in a footer ("Generated on: ..."). Works the same on both table-based and report-based templates.</td></tr>
+        <tr class="row-odd"><td><code>{{Params.X}}</code></td><td>Report-based templates only. The raw runtime parameter value the report was actually run with (e.g. whichever FY was picked) &mdash; not a report column, and deliberately not pulled from any specific row's own field either, since asking the report itself what it was run with is more direct than assuming every row agrees. A range-shaped parameter (a date/number "from"/"to" pair) isn't a single value, so those resolve blank here rather than showing something meaningless.</td></tr>
+      </tbody>
+    </table>
+    <p class="admin-help">
+      Every template also has a <strong>Page Orientation</strong> setting (Portrait/Landscape) in its own
+      editor &mdash; worth switching to Landscape once a table has enough columns that Portrait starts wrapping
+      dates and amounts onto multiple lines, cramping every row.
+    </p>
+    <p class="admin-help">
+      <strong>Report-based templates</strong> (a template whose base is a Report, not a table &mdash; see Getting
+      Started's Reports section) have three of their own tag types instead of the ones above:
+      <code>{{HeaderPanel.X}}</code> (any field on whoever the report's Header Panel is currently anchored to),
+      <code>{{#each LineItems}}...{{/each}}</code> (loops over the report's own result rows, one column tag per
+      column &mdash; e.g. <code>{{BaseRent}}</code> for a column labeled "Base Rent"), and
+      <code>{{Totals.X}}</code> (the report's own grand-total row, using the same column tag names under a
+      <code>Totals.</code> prefix).
+    </p>
+    <p class="admin-help">
+      <strong>Where that column tag name actually comes from, and the one sharp edge worth knowing about</strong>:
+      by default it's derived automatically from the column's own Label &mdash; stripped down to
+      letters/digits/underscore, so "Base Rent" becomes <code>{{BaseRent}}</code>, "Inv #" becomes
+      <code>{{Inv}}</code>. Convenient, but it means the tag a template needs to use is silently tied to whatever
+      the Label happens to say <em>right now</em> &mdash; rename "Inv #" to "Invoice No." later on Admin &rarr;
+      Reports, and every <code>{{Inv}}</code> tag in every template built against that report quietly stops
+      matching. Nothing errors; the cell just goes blank, which is a much easier thing to miss on a real document
+      than an error would be. Each column also has an optional <strong>Tag Key</strong> field, set once, that
+      overrides this derivation entirely &mdash; a column with Tag Key <code>InvNo</code> keeps responding to
+      <code>{{InvNo}}</code> forever, no matter what its Label becomes afterward. Worth setting explicitly on any
+      column a PDF template actually references, rather than relying on the Label never changing.
+    </p>
+    <p class="admin-help">
+      A genuinely <strong>broken tag reference</strong> (a typo, or referencing a field that doesn't exist)
+      renders as blank text rather than breaking the whole document &mdash; a bill/invoice should never fail to
+      generate over one missing detail. This is different, though, from a tag that resolves correctly to a value
+      that itself happens to be an error &mdash; e.g. <code>{{CGST}}</code> on a report column whose underlying
+      formula field genuinely couldn't compute (a missing GST rate for that month, say) shows
+      <code>#ERR</code> or <code>#LOOKUP: no match</code> right there in the generated document, the same as it
+      would anywhere else in the app. That's intentional, not a bug to work around: on a GST-compliance
+      document, a visible error is far safer than a blank or a zero that silently looks correct when it isn't.
+      The field picker alongside the editor inserts a working tag for you when clicked, for anything one
+      relationship hop away from the base table; a deeper chain like the Landlord example above can still be
+      typed by hand.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Errors</span></div>
+    <table class="list-table prose">
+      <thead><tr><th style="width:220px">Error</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>#ERR</code></td><td>Something in the expression itself failed (e.g. a genuinely broken formula) that isn't one of the more specific errors below.</td></tr>
+        <tr class="row-odd"><td><code>#REF: no such field "X" on table</code></td><td>A field name referenced (directly, via a cross-table dot, or inside a LOOKUP condition) doesn't exist — usually a typo or case mismatch.</td></tr>
+        <tr class="row-even"><td><code>#LOOKUP: no match</code></td><td>A LOOKUP's condition matched zero rows in the target table.</td></tr>
+        <tr class="row-odd"><td><code>#LOOKUP: ambiguous (n rows)</code></td><td>A LOOKUP's condition matched more than one row — it needs to match exactly one.</td></tr>
+      </tbody>
+    </table>
+
+  </div>

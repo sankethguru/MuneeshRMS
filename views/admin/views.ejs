@@ -80,7 +80,46 @@
     <div class="form-actions"><button class="btn btn-primary" type="submit">Save Sort Order</button></div>
   </form>
 
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">List Totals</span></div>
+  <p class="admin-help">Show a Sum/Average/Max/Min row at the bottom of the <strong><%= entity.label %></strong> List screen, computed over every row currently matching the Query/filter (not just the page you're viewing). Restricted to fields that are guaranteed to actually be numbers (Number, Currency, Percent) &mdash; not formula/rollup fields, since those can't be relied on to always produce a number.</p>
+  <% if (numericFields.length === 0) { %>
+    <p class="admin-help"><em>No Number, Currency, or Percent fields on this table yet &mdash; add one first.</em></p>
+  <% } else { %>
+  <form method="POST" action="/admin/<%= entity.key %>/views/totals">
+    <table class="list-table">
+      <thead><tr><th>Field</th><th>Function</th><th>&nbsp;</th></tr></thead>
+      <tbody id="listTotalsBody">
+        <% var totalRows = (entity.listTotals && entity.listTotals.length > 0) ? entity.listTotals : [{}]; %>
+        <% totalRows.forEach(function(t){ %>
+        <tr>
+          <td>
+            <select name="totalField">
+              <option value="">&mdash; choose a field &mdash;</option>
+              <% numericFields.forEach(function(f){ %>
+                <option value="<%= f.name %>" <%= t.field === f.name ? 'selected' : '' %>><%= f.label %></option>
+              <% }); %>
+            </select>
+          </td>
+          <td>
+            <select name="totalFn">
+              <option value="sum" <%= t.fn === 'sum' ? 'selected' : '' %>>Sum</option>
+              <option value="avg" <%= t.fn === 'avg' ? 'selected' : '' %>>Average</option>
+              <option value="max" <%= t.fn === 'max' ? 'selected' : '' %>>Max</option>
+              <option value="min" <%= t.fn === 'min' ? 'selected' : '' %>>Min</option>
+            </select>
+          </td>
+          <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)">&times;</button></td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('listTotalsBody')">+ Add Total</button></p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save List Totals</button></div>
+  </form>
+  <% } %>
+
   <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">List Filters</span></div>
+
   <p class="admin-help">Fields that get a filter control on the <strong><%= entity.label %></strong> List screen, behind the collapsed Filter button. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder. Only checkbox, dropdown, lookup, and date fields can be filters &mdash; other types are already searchable via the Query box.</p>
   <div class="list-table-wrap">
     <table class="list-table reorderable">
@@ -175,7 +214,7 @@
                   <select name="filterValue">
                     <option value="">&mdash; value &mdash;</option>
                     <% (sa.valueOptions || []).forEach(function(opt){ %>
-                      <option value="<%= opt %>" <%= sa.setting.filterValue===opt ? 'selected' : '' %>><%= opt %></option>
+                      <option value="<%= opt.value %>" <%= sa.setting.filterValue===String(opt.value) ? 'selected' : '' %>><%= opt.label %></option>
                     <% }); %>
                   </select>
                 <% } else if (vkind === 'exact' && sa.valueField.type === 'fk') { %>

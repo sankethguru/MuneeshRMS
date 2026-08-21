@@ -1,10 +1,36 @@
-<div class="admin-subtabs reorderable-list" data-reorder-url="/admin/subnav/reorder">
-  <% (adminSubnavOrder || []).forEach(function(key) { %>
-    <% var fixedPage = adminSubnavFixedPages[key]; %>
-    <% if (fixedPage) { %>
-      <a class="admin-subtab <%= sub === key ? 'active' : '' %>" data-item-id="<%= key %>" href="<%= fixedPage.href %>"><%= fixedPage.label %></a>
-    <% } else if (entities[key]) { %>
-      <a class="admin-subtab <%= sub === ('table:' + key) ? 'active' : '' %>" data-item-id="<%= key %>" href="/<%= key %>"><%= entities[key].label %></a>
+<div class="admin-layout">
+<aside class="admin-tree">
+  <%
+    var groups = [
+      { label: 'Data', items: ['tables','views','applets','composedViews','screens','picklists','backup','bulk-generate','reports','templates','data-health'] },
+      { label: 'UI', items: ['home-screen','sidebar','session','themes'] },
+      { label: 'MiniApps', items: ['payqr','tax-settings'] },
+    ];
+    var standalone = ['notifications','users','audit','errors','help'];
+  %>
+  <% groups.forEach(function(g) { %>
+    <div class="admin-tree-group">
+      <div class="admin-tree-heading"><%= g.label %></div>
+      <% g.items.forEach(function(key) { %>
+        <% var page = adminSubnavFixedPages[key]; %>
+        <% if (page) { %>
+          <a class="admin-tree-item <%= sub === key ? 'active' : '' %>" href="<%= page.href %>"><%= page.label %></a>
+        <% } %>
+      <% }); %>
+      <% if (g.label === 'Data') { %>
+        <% (adminSubnavOrder || []).forEach(function(key) { %>
+          <% if (!adminSubnavFixedPages[key] && entities[key]) { %>
+            <a class="admin-tree-item <%= sub === ('table:' + key) ? 'active' : '' %>" href="/<%= key %>"><%= entities[key].label %></a>
+          <% } %>
+        <% }); %>
+      <% } %>
+    </div>
+  <% }); %>
+  <% standalone.forEach(function(key) { %>
+    <% var page = adminSubnavFixedPages[key]; %>
+    <% if (page) { %>
+      <a class="admin-tree-item standalone <%= sub === key ? 'active' : '' %>" href="<%= page.href %>"><%= page.label %></a>
     <% } %>
   <% }); %>
-</div>
+</aside>
+<div class="admin-content">

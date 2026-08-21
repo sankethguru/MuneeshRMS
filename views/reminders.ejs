@@ -1,0 +1,51 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Reminders</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/reminders/new/form">+ New Reminder</a>
+      <a class="btn btn-toolbar" href="/reminders?view=all">Manage All</a>
+      <a class="btn btn-toolbar" href="/reminder_log">History</a>
+    </div>
+  </div>
+
+  <% if (typeof notice !== 'undefined' && notice) { %><div class="bills-status bills-status-ok"><%= notice %></div><% } %>
+  <% if (typeof error !== 'undefined' && error) { %><div class="bills-status bills-status-error"><%= error %></div><% } %>
+
+  <table class="list-table rem-table">
+    <thead>
+      <tr><th>Status</th><th>Item</th><th>Category</th><th>Type</th><th>Detail</th><th>Last Done</th><% if (canMarkDone) { %><th>Action</th><% } %></tr>
+    </thead>
+    <tbody>
+      <% if (board.length === 0) { %>
+        <tr><td colspan="7" class="bills-empty">No reminders yet. Create one with <b>+ New Reminder</b> — passport renewals, vehicle FC, generator servicing, monthly invoicing.</td></tr>
+      <% } %>
+      <% board.forEach(function (b) { const r = b.reminder, s = b.status; %>
+        <tr class="rem-row-<%= s.state %>">
+          <td><span class="rem-badge rem-badge-<%= s.state %>"><%= { overdue: 'OVERDUE', due: 'DUE', upcoming: 'Upcoming', done: 'Done', paused: 'Paused', misconfigured: 'Fix me' }[s.state] %></span></td>
+          <td><a href="/reminders/<%= r.RM_RowID %>"><%= r.RM_Item %></a></td>
+          <td><%= r.RM_Category %></td>
+          <td><%= r.RM_Type %></td>
+          <td><%= s.detail || '' %></td>
+          <td><%= b.lastDone %></td>
+          <% if (canMarkDone) { %>
+            <td class="rem-action">
+              <% if (s.state === 'overdue' || s.state === 'due' || s.state === 'upcoming') { %>
+                <form method="post" action="/reminders/<%= r.RM_RowID %>/done" class="rem-done-form">
+                  <% if (r.RM_Type === 'Date') { %>
+                    <input type="date" name="newDue" title="New due date after renewal (leave blank to pause)">
+                  <% } %>
+                  <button class="btn btn-small" type="submit">Mark Done</button>
+                </form>
+              <% } %>
+            </td>
+          <% } %>
+        </tr>
+      <% }); %>
+    </tbody>
+  </table>
+</div>
+
+<%- include('partials/foot') %>

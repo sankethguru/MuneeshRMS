@@ -1,0 +1,46 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'templates' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Template Library</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/templates/new">+ New Template</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <p class="admin-help">
+    Bill/document templates — one per table for now. A record on a table with a template gets a
+    Generate/View PDF option on its own detail page.
+  </p>
+
+  <div class="list-table-wrap">
+    <table class="list-table">
+      <thead><tr><th>Template</th><th>Table</th><th>Line Items From</th><th>&nbsp;</th></tr></thead>
+      <tbody>
+        <% if (templates.length === 0) { %>
+          <tr><td colspan="4" class="empty-row">No templates yet &mdash; click "+ New Template" to build one, or start from the GST Invoice / Rent Receipt library.</td></tr>
+        <% } %>
+        <% templates.forEach(function(t, i){ %>
+        <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+          <td><strong><%= t.label %></strong></td>
+          <td><%= entities[t.baseTable] ? entities[t.baseTable].label : t.baseTable %></td>
+          <td><%= t.lineItemsChildTable ? (entities[t.lineItemsChildTable] ? entities[t.lineItemsChildTable].label : t.lineItemsChildTable) : '\u2014 (uses the record itself)' %></td>
+          <td class="nowrap">
+            <a class="btn btn-mini" href="/admin/templates/<%= t.key %>/edit">Edit</a>
+            <form method="POST" action="/admin/templates/<%= t.key %>/delete" style="display:inline" onsubmit="return confirm('Delete this template? Any stored PDFs generated from it stay as they are.');">
+              <button class="btn btn-mini btn-danger" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

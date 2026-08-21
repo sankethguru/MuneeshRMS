@@ -1,6 +1,6 @@
 {
   "name": "muneesh-legacy",
-  "version": "2.0.0",
+  "version": "4.3.0",
   "description": "Muneesh Legacy - Rental & Property Management",
   "main": "server.js",
   "scripts": {
@@ -17,6 +17,8 @@
     "express-session": "^1.18.0",
     "morgan": "^1.10.0",
     "multer": "^2.2.0",
+    "nodemailer": "^9.0.4",
+    "puppeteer-core": "^25.3.0",
     "qrcode": "^1.5.4",
     "sortablejs": "^1.15.6"
   }

@@ -1,0 +1,1206 @@
+  <div style="padding: 16px 20px;">
+
+    <p class="admin-help">
+      This is a plain-language walkthrough of actually using this app, start to finish. The first part
+      (Steps 1&ndash;6) is the everyday, must-know workflow &mdash; setting up your first landlord, tenant, and
+      invoice, and recording your first payment. Steps 7&ndash;10 and the Everyday Mini-Apps section after them
+      (Bills, Reminders, Tax) are genuinely everyday-use tools too, worth reading once things feel comfortable
+      with the basics. The Admin Toolkit further down is occasional, setup-once configuration rather than daily
+      use, and the Dos and Don'ts table near the end is a quick-reference summary of everything explained in
+      full above it &mdash; worth a skim once, then a glance back whenever something feels uncertain. Wherever
+      something has real moving parts underneath it, this page works through it with an actual example &mdash;
+      real field names, real data &mdash; rather than just naming the feature and moving on. If you're looking
+      for the <em>formula language</em> (for building your own calculated fields, rollups, or reports), that's a
+      separate page: <a href="/admin/help?view=formula-reference">Formula Language Reference</a>.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">The Big Picture</span></div>
+    <p class="admin-help">
+      Everything in this app connects together in one natural chain:
+    </p>
+    <p class="admin-help" style="font-family:monospace; background:#f7f6f0; padding:10px 14px; border:1px solid var(--border-dark);">
+      Landlord &rarr; Property &rarr; Tenant &rarr; Invoice &rarr; Payment
+    </p>
+    <p class="admin-help">
+      A <strong>Landlord</strong> owns one or more <strong>Properties</strong>. Each Property has one or more
+      <strong>Tenants</strong> renting space in it. Each Tenant gets billed periodically via an
+      <strong>Invoice</strong>. Money coming in against those invoices, and money going out to people you pay
+      (contractors, staff, anyone), gets tracked as a <strong>Payment</strong>. Setting things up roughly follows
+      that same order &mdash; you can't create a Tenant until the Property and Landlord it belongs to already
+      exist, for instance. Every one of these is a real link (not just similar-looking names) &mdash; which is
+      what makes it possible for an Invoice to automatically know its tenant's rent, or a Property to know its
+      landlord's GSTIN, without you re-typing anything.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 1 &mdash; Add a Landlord</span></div>
+    <p class="admin-help">
+      Go to the <strong>Landlords</strong> tab and click <strong>+ New Record</strong>. Fill in their identity
+      details &mdash; name, PAN, GSTIN, address, and so on. If a landlord operates in more than one state (and
+      is GST-registered separately in each), you'll see a <strong>Group</strong> field &mdash; leave that pointing
+      at itself for the very first registration you create for this landlord (worked through fully in Step 4
+      below, since the exact same idea applies to Tenants and is easier to explain with a concrete example there).
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 2 &mdash; Add a Property</span></div>
+    <p class="admin-help">
+      Go to <strong>Property</strong>, click <strong>+ New Record</strong>, and link it to the Landlord you just
+      created. Fill in the address and, importantly, the <strong>State</strong> the property is actually located
+      in &mdash; this matters for GST later (it decides whether a bill is CGST+SGST or something else, and which
+      of a multi-state landlord's registrations actually applies to this specific property).
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 3 &mdash; Add Banking Info</span></div>
+    <p class="admin-help">
+      If you're tracking security deposits or other banking details tied to a tenant, set those up under
+      <strong>Banking</strong> before creating the tenant itself, since the Tenant form will ask you to link to
+      an existing Banking record rather than create one on the fly.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 4 &mdash; Add a Tenant, and Understanding Revisions</span></div>
+    <p class="admin-help">
+      Go to <strong>Tenants</strong> and create your first tenant, linking them to the Property they're renting.
+      Give them a distinctive <strong>Tenant Code</strong> &mdash; something like <code>tenantA_1</code>, where
+      the trailing <code>_1</code> means "first version of this tenant's terms."
+    </p>
+    <p class="admin-help">
+      <strong>Why "first version"?</strong> Rent and lease terms change over time &mdash; a renewal, a rate
+      increase, a change in service category. If you just edited the same tenant record every time that happened,
+      every <em>old</em> invoice tied to that tenant would suddenly look like it used the <em>new</em> terms too,
+      which isn't right &mdash; an invoice from last year should always reflect what was actually true last year.
+      So a change in terms means creating a <strong>new</strong> tenant record (e.g. <code>tenantA_2</code>)
+      rather than editing the old one.
+    </p>
+    <p class="admin-help">
+      Here's what that actually looks like once a tenant has gone through two rent changes &mdash; three real
+      rows, all genuinely "TenantA" at different points in time:
+    </p>
+    <table class="list-table prose">
+      <thead><tr><th>T_Code</th><th>Rent</th><th>T_GroupRoot</th><th>T_IsCurrent</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td>tenantA_1</td><td>&#8377;50,000</td><td>tenantA_1 <em>(points at itself)</em></td><td>No</td></tr>
+        <tr class="row-odd"><td>tenantA_1.1</td><td>&#8377;50,000 (minor term change)</td><td>tenantA_1</td><td>No</td></tr>
+        <tr class="row-even"><td>tenantA_2</td><td>&#8377;60,000</td><td>tenantA_1</td><td><strong>Yes</strong></td></tr>
+      </tbody>
+    </table>
+    <p class="admin-help">
+      Two fields make this work, and they answer two genuinely different questions:
+    </p>
+    <table class="list-table prose">
+      <thead><tr><th style="width:160px">Field</th><th>Answers</th><th>Used when</th></tr></thead>
+      <tbody>
+        <tr class="row-even">
+          <td><strong>T_GroupRoot</strong></td>
+          <td>"Which family does this row belong to?"</td>
+          <td>You want <em>everything</em>, across every revision &mdash; e.g. a report gathering every bill this
+          tenant has ever been sent, regardless of which revision was active at the time.</td>
+        </tr>
+        <tr class="row-odd">
+          <td><strong>T_IsCurrent</strong></td>
+          <td>"Which one row in this family is active right now?"</td>
+          <td>You need <em>one specific</em> answer &mdash; e.g. "what's this tenant's name and terms today,"
+          when there are three rows that could technically answer that question but only one that's actually
+          correct right now.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="admin-help">
+      A <strong>LOOKUP</strong> formula is what actually does the picking, wherever the app needs "this tenant's
+      current details" (a bill header, a report):
+    </p>
+    <p class="admin-help" style="font-family:monospace; background:#f7f6f0; padding:8px 10px; border:1px solid var(--border-dark);">
+      LOOKUP("tenants", "tenants.T_GroupRoot = BILLS_ClientCode.T_GroupRoot AND tenants.T_IsCurrent = true", "T_Name")
+    </p>
+    <p class="admin-help">
+      Read as: <em>"search Tenants for the one row that's (a) in the same family as this bill's tenant, and (b)
+      marked current &mdash; give me that row's Client Name."</em> <code>T_IsCurrent</code> is the tie-breaker
+      that lets this formula find exactly one row instead of three.
+    </p>
+    <p class="admin-help">
+      <strong>Setting a brand-new revision's Group field has one real gotcha worth knowing up front</strong>:
+      a lookup field's dropdown only offers records that already exist, so you can't set a brand-new root's
+      <code>T_GroupRoot</code> to itself while you're still creating it &mdash; it can't appear in its own
+      dropdown before it exists. Save it first with <code>T_GroupRoot</code> left blank, then edit it again and
+      set <code>T_GroupRoot</code> to itself (it'll now show up in its own dropdown, since it's a real saved
+      record at that point).
+    </p>
+    <p class="admin-help">
+      <strong>The ongoing discipline, every time you create a new revision</strong> (say <code>tenantA_3</code>
+      next year): (1) set its <code>T_GroupRoot</code> to <code>tenantA_1</code> to join the family, (2) set its
+      own <code>T_IsCurrent</code> to Yes, and (3) go back and flip <code>tenantA_2</code>'s
+      <code>T_IsCurrent</code> to No. Nothing does this automatically &mdash; it's a manual three-step habit
+      each time terms change, which for most tenants is once a year or less.
+    </p>
+    <p class="admin-help">
+      Landlords use the same <code>LL_GroupRoot</code> idea, for a different real-world reason: a landlord can be
+      GST-registered in Karnataka <em>and</em> Maharashtra <em>at the same time</em> &mdash; unlike tenant
+      revisions, these aren't sequential (one replacing the last), they're simultaneous, so there's no landlord
+      equivalent of "Is Current." The intended mechanism is the same shape as the Tenant one above &mdash; a
+      LOOKUP matching a property's own state against the right registration in that landlord's group &mdash; but
+      unlike the Tenant/Is Current mechanism confirmed above, <strong>this isn't wired up as a real field
+      anywhere yet</strong>: there's currently no State field on Landlords itself for such a lookup to match
+      against. Worth knowing as a real gap rather than assuming it's already handled if a landlord in your data
+      genuinely has multiple state registrations — flagged in the backlog to get this properly designed and
+      built rather than described here as if it already works.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 5 &mdash; Create an Invoice</span></div>
+    <p class="admin-help">
+      Go to <strong>Invoices</strong> and create one, linking it to the Tenant being billed and the Invoice Date.
+      Most of the other fields &mdash; base rent, CGST/SGST percentages and amounts, the total &mdash; fill
+      themselves in automatically once you save, calculated from the tenant's terms and the applicable GST rate
+      for that month. You shouldn't need to type those in by hand.
+    </p>
+    <p class="admin-help">
+      <strong>GST filing status</strong> is tracked separately, not on the invoice itself &mdash; a single GST
+      return covers every invoice for a landlord in a given month, so the filing data (whether GSTR-1/GSTR-3B
+      has been filed, the reference numbers, dates) lives on its own GST Filings record, and each invoice just
+      links to the one covering its month. <strong>Only monthly filing is currently supported</strong> &mdash;
+      if a landlord elects quarterly filing (the QRMP scheme), that isn't handled by the app today and will need
+      manual workarounds until it's built.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 6 &mdash; Record a Payment</span></div>
+    <p class="admin-help">
+      Go to <strong>Payments</strong> to record money going out to a Payee (set up under <strong>Payees</strong>
+      first if you haven't already). If a Payee has a UPI ID on file, you'll see a QR code you can scan directly
+      from your banking app to actually send the payment &mdash; no need to type an amount or UPI ID by hand into
+      your bank's app; the amount and reference are already encoded in the code itself.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 7 &mdash; Finding Things Fast</span></div>
+    <p class="admin-help">
+      As the amount of data grows, three tools help you get to the right record quickly &mdash; all available
+      on every list screen without any setup:
+    </p>
+    <table class="list-table prose">
+      <thead><tr><th style="width:180px">Tool</th><th>How to use it</th></tr></thead>
+      <tbody>
+        <tr class="row-even">
+          <td><strong>Search Everything</strong></td>
+          <td>The search box in the top masthead, visible on every page. Type anything and press Enter. For
+          example, typing part of a landlord's name searches every table you have access to at once and groups
+          the results by table &mdash; so if that same text also happens to match a tenant or a bill note, you'd
+          see all of those too, grouped separately, rather than having to already know which table to look in
+          first. Shows the top few matches per table, with a link to see the rest if there are more.</td>
+        </tr>
+        <tr class="row-odd">
+          <td><strong>Query (per table)</strong></td>
+          <td>Each list screen (Landlords, Tenants, etc.) has its own <strong>Query</strong> box near the top &mdash;
+          narrower than global search, but remembers what you last typed even after you leave and come back to
+          that screen. Click <strong>Clear</strong> to reset it. There's also a <strong>Filter</strong> button
+          next to it for narrowing by a specific field's exact value or a date/number range, if the table has
+          any filterable fields configured.</td>
+        </tr>
+        <tr class="row-even">
+          <td><strong>Sortable columns</strong></td>
+          <td>Click any column header to sort by it &mdash; click again to reverse the direction. An arrow shows
+          which column and direction is currently active. This choice is remembered the same way Query is, until
+          you Clear it.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="admin-help">
+      Long lists are split across pages automatically (50 records per page) &mdash; Previous/Next links appear
+      at the bottom of the table when there's more than one page. Query, Filter, and sort all apply across the
+      <em>whole</em> filtered set, not just the page you're looking at &mdash; so if 200 payments match your
+      filter, sorting by amount sorts all 200, not just the 50 currently showing.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 8 &mdash; Totals at the Bottom of a List</span></div>
+    <p class="admin-help">
+      Some tables show a highlighted <strong>Totals</strong> row at the bottom of their list &mdash; a Sum,
+      Average, Max, or Min of one or more numeric columns. This has to be turned on once per table first (see
+      <strong>List Totals</strong> under the Admin Toolkit below) &mdash; once it is, it updates live with
+      whatever you're currently looking at. Concretely: three payments of &#8377;1,000, &#8377;2,500, and
+      &#8377;500 show a Sum of &#8377;4,000 with no filter applied. Filter the list down to just the ones matching
+      a particular note or date range, and the Sum recalculates against only those matching rows &mdash; it's
+      always the total of what you're currently seeing, not a fixed number for the whole table.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 9 &mdash; Undoing a Mistake</span></div>
+    <p class="admin-help">
+      Clicking <strong>Delete</strong> on a record doesn't remove it right away &mdash; it moves to that table's
+      <strong>Trash</strong> (a button on the list screen's toolbar), where it's kept for 30 days before being
+      permanently removed automatically. From Trash you can <strong>Restore</strong> it back to normal, or
+      <strong>Delete Forever</strong> if you're sure. One safeguard worth knowing: a record that's still
+      referenced by something else (e.g. a Landlord with Tenants still pointing at it) can't be deleted at all,
+      soft or permanent, until those references are removed or reassigned first &mdash; you'll see a clear
+      message naming exactly what's blocking it, rather than a vague failure.
+    </p>
+    <p class="admin-help">
+      If you imported a batch of records via CSV and something about the import was wrong (wrong column mapped,
+      say), there's a matching <strong>Undo This Import</strong> button that appears right after a successful
+      import &mdash; it removes every record from that specific batch as a unit, in one action, rather than
+      needing to find and delete each imported row by hand. If any record from that batch has since been
+      referenced by something else, the whole undo is blocked (same safeguard as above) rather than partially
+      undoing it and leaving things in a half-consistent state.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Step 10 &mdash; Generating a Bill or Invoice PDF</span></div>
+    <p class="admin-help">
+      If a table has a <strong>Template</strong> configured (see Template Library in the Admin Toolkit below),
+      any record on that table gets a <strong>Generate PDF</strong> button on its own detail page. Concretely,
+      here's what a real "GST Invoice" template actually produces, generated from one real Bill record:
+    </p>
+    <p class="admin-help" style="font-family:monospace; background:#f7f6f0; padding:10px 14px; border:1px solid var(--border-dark); white-space:pre-line;">TAX INVOICE                                     Invoice #: 1
+                                                 Date: 01-06-2026
+
+BILLED BY                        BILLED TO
+Muneesh Family Trust              BrightTech Solutions Pvt Ltd
+12 Lavelle Road, Bengaluru        3rd Floor, Lavelle Arcade
+GSTIN: 29AAAPM1234A1Z5            GSTIN: 29AACCB4321C1ZP
+
+Description              Amount
+Rent for June 2026        385000
+                    Total: 385000</p>
+    <p class="admin-help">
+      Every one of those values came from real, linked data &mdash; the landlord's name and GSTIN weren't typed
+      into this specific bill at all; they were pulled live from the Landlord record, by way of the bill's own
+      Tenant, at the moment the PDF was generated. That's what makes the button meaningful: click it, and a real
+      PDF is created from that record's actual current data and saved &mdash; a <strong>View PDF</strong> button
+      then appears to open it. Clicking <strong>Re-generate PDF</strong> later replaces the stored copy with a
+      fresh one, which matters if the underlying data (say, the landlord's GSTIN) changed since the last time you
+      generated it.
+    </p>
+    <p class="admin-help">
+      Setting up the template itself (what the PDF actually looks like, and which fields go where) is an admin,
+      one-time-per-table task &mdash; covered under Template Library below. Once it's set up, everyone with
+      access to that table just sees the Generate/View PDF buttons and never needs to think about templates at
+      all.
+    </p>
+    <p class="admin-help">
+      <strong>Two things worth knowing specifically about a GST invoice template</strong>, both plain data/template
+      pieces rather than a separate feature to turn on:
+    </p>
+    <table class="list-table prose">
+      <thead><tr><th style="width:190px">Thing</th><th>How it actually works</th></tr></thead>
+      <tbody>
+        <tr class="row-even">
+          <td>Amount in words</td>
+          <td>A new formula function, <code>AMOUNT_TO_WORDS(n)</code>, converts a Rupee amount into the standard
+          Indian invoice wording &mdash; e.g. <code>428340</code> &rarr; "Rupees Four Lakh Twenty Eight Thousand
+          Three Hundred Forty Only" &mdash; using the crore/lakh/thousand grouping, not the Western
+          million/billion one. Add a formula field (e.g. <code>I_AmountInWords</code>, formula
+          <code>AMOUNT_TO_WORDS(I_TotalBill)</code>) to whichever table needs it, then reference it in the
+          template as an ordinary merge tag (<code>{{I_AmountInWords}}</code>) &mdash; same as any other field,
+          nothing template-specific about it. Full syntax on the
+          <a href="/admin/help?view=formula-reference">Formula Language Reference</a> page.</td>
+        </tr>
+        <tr class="row-odd">
+          <td>"Original for Recipient" / "Duplicate for Supplier"</td>
+          <td>Not a separate mode to turn on &mdash; a template is just HTML, so a template can repeat the whole
+          invoice twice with a page break in between, each copy showing a different label in its own banner. One
+          Generate PDF click then produces both pages in the same file, always in sync with each other since
+          they're reading the exact same record. Worth copying the page-break approach exactly if building this
+          yourself: a plain <code>page-break-before: always</code> on the second copy's outer wrapper, rather
+          than a fixed spacer, so it still lands cleanly on its own page regardless of how long the line-items
+          table happens to be.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Everyday Mini-Apps</span></div>
+    <p class="admin-help">
+      Three purpose-built tools, each covering something the core Landlord/Property/Tenant/Invoice chain above
+      doesn't &mdash; recurring household/business bills, renewal and servicing reminders, and income-tax
+      computation. Unlike the Admin Toolkit further down, these are everyday-use screens once someone's set them
+      up, not admin configuration &mdash; but they're substantial enough to be genuinely new concepts, not just
+      another table, so each gets its own real walkthrough here rather than a one-line mention.
+    </p>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Bills</strong> &mdash; <span class="admin-hint">Bills (sidebar)</span></p>
+      <p class="admin-help">
+        A recurring-expense matrix &mdash; items down the side, months across the top, replacing the habit of
+        typing amounts down a column in a spreadsheet. Two real tables sit underneath it (<strong>Expense
+        Items</strong> the recurring bill itself &mdash; electricity, water, a credit card &mdash; and
+        <strong>Expense Entries</strong> one row per item per month actually paid), but the Bills screen itself
+        is the fast way in for day-to-day use; the raw tables are still there under Admin if you ever need to
+        edit or filter them directly.
+      </p>
+      <p class="admin-help">
+        <strong>Setting up a bill</strong>: click "Expense Items" from the Bills toolbar, or go straight to the
+        Expense Items table, and add one row per recurring payable &mdash; <strong>Item</strong> (a name),
+        <strong>Category</strong> (groups the matrix into sections &mdash; Electricity, Water, Credit Cards, and
+        so on come pre-loaded, but this is an ordinary picklist field, fully editable like any other under Admin
+        &rarr; Expense Items &rarr; Fields), <strong>Paid From</strong>, <strong>Due Day</strong>,
+        <strong>Mode</strong> (Manual or Auto-debit), and <strong>Archived</strong> (a plain Yes/No checkbox &mdash;
+        ticking it drops the item out of the live matrix, but it stays visible for any month it already has real
+        entries in, so its own history isn't hidden).
+      </p>
+      <p class="admin-help">
+        <strong>Entering a month's amounts</strong>: on the Bills screen, pick the month from the "Entry Month"
+        dropdown &mdash; its whole column becomes editable. Click a cell (or arrow up/down from one you're
+        already in) and it turns into a plain box showing the raw number to type into; click away, or move to
+        another cell, and it goes back to showing the normal formatted currency text, matching every other month
+        column, so the grid only ever looks "editable" for the one cell you're actually working on. Leave a cell
+        blank and save to clear that month's entry entirely (it's moved to Trash like any other delete, not
+        gone for good). <strong>Save Month</strong> only writes the cells you actually touched &mdash; nothing
+        else on the grid is affected.
+      </p>
+      <p class="admin-help">
+        <strong>One real caveat</strong> worth knowing rather than discovering by surprise: renaming the
+        "Archived" option in Status (Admin &rarr; Expense Items &rarr; Fields) to some other word doesn't just
+        rename it &mdash; the actual archiving behavior is tied to that specific word internally, so an item
+        marked with the renamed option would silently stop dropping out of the live grid. Leave "Archived" as the
+        literal option name if you want the Archive behavior to keep working; renaming everything else (the
+        category list, Mode's options) is completely safe.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Reminders</strong> &mdash; <span class="admin-hint">Reminders (sidebar)</span></p>
+      <p class="admin-help">
+        Tracks three genuinely different kinds of "don't forget this," each with its own due-logic and its own
+        idea of what "mark done" should actually do &mdash; picked per reminder via its own <strong>Type</strong>
+        field:
+      </p>
+      <table class="list-table prose">
+        <thead><tr><th style="width:110px">Type</th><th>For things like&hellip;</th><th>Marking it done</th></tr></thead>
+        <tbody>
+          <tr class="row-even">
+            <td><strong>Date</strong></td>
+            <td>A passport, a license, a vehicle's FC &mdash; anything with a fixed real expiry.</td>
+            <td>Enter the new expiry date once you've actually renewed it, and Next Due moves to that. Mark it
+            done <em>without</em> a new date, and the reminder pauses instead of nagging "overdue" forever about
+            something that's genuinely been handled &mdash; a clear on-screen note explains this at the moment
+            it happens, and reminds you to uncheck Paused once the real new date is known.</td>
+          </tr>
+          <tr class="row-odd">
+            <td><strong>Recurring</strong></td>
+            <td>Generator servicing every 12 months, an emission test every 6.</td>
+            <td>Next Due advances by <strong>Every N Months</strong> &mdash; but from the date it was
+            <em>scheduled</em> for, not the date you actually got around to it. Concretely: a service due 25 July
+            2026, actually done a week late on 2 August, still advances Next Due to 25 July 2027, not 2 August
+            2027 &mdash; so a service that's always been "the July one" stays the July one even after an
+            occasional late month, rather than slowly drifting later every time it's a few days overdue.</td>
+          </tr>
+          <tr class="row-even">
+            <td><strong>Monthly</strong></td>
+            <td>A checklist that resets itself every month &mdash; "send this month's rent invoices," for
+            instance.</td>
+            <td>Marking it done just logs a completion for the current calendar month. It goes back to showing
+            as due the moment a new month starts, with no date field to manage at all.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="admin-help">
+        <strong>Lead Days</strong> controls how far in advance a Date or Recurring reminder starts showing as
+        "due" rather than just "upcoming" &mdash; a passport renewal with a genuinely long process wants a big
+        number here (say 60 or 90 days), while a same-day errand barely needs any lead time at all. The Home
+        page's own <strong>Due Soon</strong> panel surfaces whatever's currently overdue or due across every
+        reminder, without needing to visit the Reminders screen itself to notice something needs attention.
+      </p>
+      <p class="admin-help">
+        <strong>Paused</strong> (a plain Yes/No checkbox, same idea as Bills' Archived above) keeps a reminder's
+        history intact while stopping it from ever showing as due &mdash; useful for something genuinely on
+        hold rather than truly done.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Tax</strong> &mdash; <span class="admin-hint">Tax Worksheets (sidebar)</span></p>
+      <p class="admin-help">
+        Income-tax and advance-tax computation, per landlord group per financial year &mdash; pulling real rent
+        and TDS straight from Invoices rather than needing it re-entered. <strong>This produces a genuine
+        estimate to work from, not a substitute for your actual auditor</strong> &mdash; every computation page
+        says this plainly, and it's worth taking at face value rather than as boilerplate: tax law changes
+        yearly, and the rates behind this are ordinary data (see Tax Slabs/Tax Config below) that need to be kept
+        current and verified, not code that's guaranteed to already reflect this year's Budget.
+      </p>
+      <p class="admin-help">
+        <strong>Creating a worksheet</strong>: go to Tax Worksheets, add a new one, and pick the
+        <strong>Landlord</strong> (any single GST registration of theirs &mdash; the computation automatically
+        covers the whole landlord group, every state registration together, since income tax attaches to the
+        person/PAN, not to one GSTIN) and the <strong>Financial Year</strong>. Regime (New or Old) is yours to
+        choose per worksheet. Municipal taxes actually paid, housing loan interest, and any other income or
+        deductions get entered by hand &mdash; rent and rent TDS are pulled in automatically from real Invoice
+        records dated inside that FY, so they're never typed in twice.
+      </p>
+      <p class="admin-help">
+        <strong>The computation view</strong> (open a worksheet, then "View Computation") walks the whole
+        cascade in order &mdash; gross rent, less municipal taxes, less the standard 30% deduction, less loan
+        interest, giving Income from House Property; added to other income for Gross Total Income; slab tax,
+        87A rebate if eligible, surcharge (with full marginal relief, not a flat rate) if the income crosses a
+        surcharge threshold, health & education cess, and finally net payable after subtracting rent TDS and any
+        other TDS credit &mdash; followed by the actual <strong>advance-tax schedule</strong> (the 15/45/75/100%
+        due dates through the year), matched against whatever's actually been paid so far under Advance Tax
+        Payments, so a shortfall against any given installment is visible directly rather than needing to work
+        it out by hand. A payment is logged against a <strong>Landlord</strong> and <strong>Financial Year</strong>
+        directly, not against a specific worksheet &mdash; so the June installment can be recorded the day it's
+        paid, well before there's necessarily a reason to sit down and build the full worksheet; whichever
+        worksheet later covers that same landlord group and FY picks it up automatically.
+      </p>
+      <p class="admin-help">
+        <strong>Landlord Annexure</strong> (a link from the computation view) is a separate, printable summary
+        for the same landlord group &mdash; every bank account and every property held, gathered from whichever
+        real tables carry a link to Landlords, useful to hand an auditor alongside the computation itself.
+        Opening it from a worksheet's own "Annexure" button also pulls in four detailed, FY-specific schedules
+        for that same year &mdash; rent broken down property by property, TDS broken down tenant by tenant,
+        interest broken down bank by bank, and every individual advance/self-assessment payment with its own
+        challan and date &mdash; matching the level of detail a real CA-prepared computation statement usually
+        shows, rather than just the summary totals the main computation view itself works with. The FY box at
+        the top of the Annexure page can be changed to see any other year's schedules without going back to a
+        specific worksheet first.
+      </p>
+      <p class="admin-help">
+        <strong>Tax Slabs and Tax Config</strong> are ordinary, admin-editable tables holding the actual rates
+        (slab brackets, cess percentage, 87A limits, surcharge tiers) per financial year per regime &mdash; a
+        Budget change is a data edit here, never something that needs new code. Seeded with real current-year
+        rates on first use, clearly flagged for the same reason as above: verify them, don't just trust that
+        they're still correct next year.
+      </p>
+      <p class="admin-help">
+        <strong>Tax only works with tables named exactly <code>landlords</code>, <code>tenants</code>, and
+        <code>invoices</code></strong> &mdash; not a restriction that can be configured away, the same boundary
+        PayQR draws around its own two tables. <em>Which field</em> on those tables plays each role (the taxable
+        rent amount, TDS deducted, the invoice date, the landlord group-root, and a few Annexure display fields
+        like PAN and GSTIN) is fully configurable under <span class="admin-hint">Admin &rarr; Tax
+        Settings</span>, so renaming a field &mdash; or setting Tax up on an install that used different field
+        names from the start &mdash; doesn't need a code change. Until every required role is mapped, every Tax
+        screen shows a plain "not configured" message rather than computing against a missing or wrong field; a
+        one-time banner explains this the first time Tax is opened, dismissible for good once read.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Advance Tax Projections</strong> &mdash; <span class="admin-hint">Advance Tax Projections (sidebar)</span></p>
+      <p class="admin-help">
+        A genuinely separate tool from the real Tax Worksheet above, not a replacement for it &mdash; every
+        screen here is clearly marked <strong>SIMULATION</strong>, since the whole point is estimating tax on
+        income that hasn't happened yet. Advance tax has to be paid through the year based on what you
+        <em>expect</em> to earn, not just what's already been invoiced &mdash; useful when a tenant's rent is
+        due to change mid-year, a lease is ending, or a new one hasn't started yet.
+      </p>
+      <p class="admin-help">
+        <strong>Creating a projection</strong>: pick the <strong>Landlord</strong> and <strong>Financial
+        Year</strong>, same as a real worksheet, plus whatever you already expect for Municipal Taxes, Loan
+        Interest, and Other Income for the year &mdash; entered once and remembered every time you come back to
+        adjust the projection as the year goes on, rather than re-asked.
+      </p>
+      <p class="admin-help">
+        <strong>Rows</strong> are where the actual projecting happens &mdash; one row per tenant, a plain
+        monthly <strong>Rental</strong> figure times a <strong>Months</strong> count, matching whatever working
+        spreadsheet you're used to rather than trying to be a precise day-count engine. <strong>Populate from
+        Active Tenants</strong> creates one row per currently-active tenant in one click, auto-filled from their
+        real record (rent, TDS Debitor, and a suggested Months figure from their own tenancy dates) &mdash; so a
+        flat, nothing-changing year needs zero further edits, and you only add or adjust rows for what's
+        actually different: a known rent increase, a lease ending partway through, or <strong>+ Add Row</strong>
+        for a hypothetical, not-yet-signed lease that doesn't exist in Tenants at all.
+      </p>
+      <p class="admin-help">
+        Every auto-filled value, including Months, is a starting suggestion only &mdash; a plain, directly
+        editable number on the row, same as if you'd typed it yourself. A tenant whose lease starts mid-month
+        and has its own convention for that first month's rent is exactly the kind of case the suggestion isn't
+        trying to get precisely right; it only saves typing on the rows where nothing unusual is happening.
+      </p>
+      <p class="admin-help">
+        Once real invoices start landing against a tenant this FY, the row shows a quiet flag if its own
+        monthly rate has drifted more than 10% from what's actually being invoiced &mdash; a nudge that the
+        projection might be stale, not a block on anything. The projection's own advance-tax schedule (the same
+        15/45/75/100% by-when math the real worksheet uses) is compared against payments you've <em>actually</em>
+        made, so it tells you what to pay next based on this year's real expectations, not last year's.
+      </p>
+    </div>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Admin Toolkit &mdash; Worth Knowing Exists</span></div>
+    <p class="admin-help">
+      Everything below is admin-level setup &mdash; things you'll configure occasionally, not every day. Skim
+      this section once, then come back to the specific part when you actually need it.
+    </p>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Sidebar</strong> &mdash; <span class="admin-hint">Admin &rarr; Sidebar</span></p>
+      <p class="admin-help">
+        The left sidebar's own groups, items, and icons are entirely admin-editable rather than fixed &mdash;
+        replacing the old single-row tab bar across the top, which had started wrapping to two rows as more
+        tables and mini-apps were added. Each group can hold any mix of real tables, custom Screens, and the
+        built-in mini-apps (Bills, Reminders, Reports) &mdash; the same table can even sit in more than one
+        group if that genuinely makes sense for how you think about it. Drag the &#9776; handle to reorder
+        groups or the items inside one; click a group's own label in the real sidebar to collapse just that
+        group, or the &#9776; button next to the logo to collapse the whole sidebar down to an icon-only rail
+        &mdash; both remember your choice the next time you load the app, per browser.
+      </p>
+      <p class="admin-help">
+        Icons come from a small built-in set for now, picked per item from a grid in the editor. They're drawn
+        from one central list (<code>icons.js</code>) that a custom icon set can fully replace later without
+        touching anything else &mdash; the sidebar, the schema, and this admin editor only ever refer to an icon
+        by a plain name like <code>"building"</code>, never by the actual artwork, so swapping the set in is a
+        one-file change whenever a custom set is ready.
+      </p>
+      <p class="admin-help">
+        Upgrading from before this feature existed: your existing tab order becomes one "All Tables" group
+        automatically, with a reasonable best-guess icon per table (matched from the table's own name) &mdash;
+        nothing to do to keep working exactly as before, until you're ready to actually reorganize it.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Home Screen</strong> &mdash; <span class="admin-hint">Admin &rarr; Home Screen</span></p>
+      <p class="admin-help">
+        What shows on the Home page, in whatever order you like &mdash; same drag-to-reorder editor as the
+        Sidebar, but a flat list of <strong>widgets</strong> rather than nested groups, since widgets aren't
+        grouped. Before this existed, Home was just the Due Soon panel (or a blank box on a day nothing's due)
+        &mdash; upgrading changes nothing by itself, since that one Due Soon widget becomes the whole list until
+        you add more.
+      </p>
+      <p class="admin-help">
+        Twelve widget types today, each reading real data from tables that already exist elsewhere &mdash;
+        nothing new to track just to populate the Home page:
+      </p>
+      <table class="list-table prose">
+        <thead><tr><th style="width:150px">Widget</th><th>What it shows</th></tr></thead>
+        <tbody>
+          <tr class="row-even"><td><strong>Due Soon</strong></td><td>The same overdue/due reminders as the Reminders board itself &mdash; see Step 7 above.</td></tr>
+          <tr class="row-odd"><td><strong>This Month's Rent Status</strong></td><td>How many invoices fall in the current calendar month, how many already have a real amount recorded against Rent Received, and the ₹ collected so far against what's billed.</td></tr>
+          <tr class="row-even"><td><strong>Tax Filing Alerts</strong></td><td>Every real landlord group that has no Tax Worksheet yet for the current FY, plus any existing worksheet whose advance-tax paid so far is running short &mdash; the same shortfall math the worksheet's own computation page already does, surfaced here without needing to open each one.</td></tr>
+          <tr class="row-odd"><td><strong>Quick Actions</strong></td><td>A row of "+ New" shortcut buttons to whichever tables you pick in the widget's own settings &mdash; only shows a button for a table you actually have create permission on.</td></tr>
+          <tr class="row-even"><td><strong>KPI Cards</strong></td><td>A small set of simple counts and totals &mdash; pick which ones to show in the widget's own settings (see the full metric list below).</td></tr>
+          <tr class="row-odd"><td><strong>Bills Due This Month</strong></td><td>Every active recurring expense with no entry recorded yet for the current month &mdash; the Bills grid's own "still owed" list, without opening Bills itself.</td></tr>
+          <tr class="row-even"><td><strong>Uncleared Cheques</strong></td><td>Every cheque with no Clear Date recorded yet, oldest first, with a running ₹ total.</td></tr>
+          <tr class="row-odd"><td><strong>Credit Card Bills Due</strong></td><td>Every CC Tracker entry where what's actually been paid falls short of the billed amount, with the outstanding ₹ per card.</td></tr>
+          <tr class="row-even"><td><strong>Advance Tax Next-Due</strong></td><td>Across every real Advance Tax Projection, whatever's due by that projection's own next unpaid installment date &mdash; a projection already fully covered by real payments contributes nothing, so this stays quiet on a year where nothing's actually owed yet.</td></tr>
+          <tr class="row-odd"><td><strong>Recent Activity</strong></td><td>The last several logged changes app-wide &mdash; admin-only, and only ever shows a change on a table that has its own audit trail turned on (Admin &rarr; that table &rarr; Settings).</td></tr>
+          <tr class="row-even"><td><strong>Announcement / Note</strong></td><td>Plain text you type once in the widget's own settings, shown as-is &mdash; a reminder to yourself, nothing computed.</td></tr>
+          <tr class="row-odd"><td><strong>Report Card</strong></td><td>Points at any existing Report (Admin Toolkit &rarr; Reports, below) and shows its own totals row, or its first few rows if it has none &mdash; see the note just below on why this is the real way to customize what the Home page can show.</td></tr>
+        </tbody>
+      </table>
+      <p class="admin-help">
+        <strong>Report Card is deliberately the general-purpose one</strong> &mdash; rather than build a second,
+        parallel way to define "count/filter/total something," it just points at a Report you've already built
+        (or build one specifically for this), reusing the exact same filter-and-aggregate engine Reports already
+        has. Anything expressible as a Report becomes available as a Home Screen widget this way, on any table,
+        with any condition &mdash; not limited to the fixed KPI list below. It runs with no parameters entered,
+        the same as opening that Report fresh with nothing filtered.
+      </p>
+      <p class="admin-help">
+        <strong>KPI Cards</strong>' own metric list, for reference: Active Tenants, Properties Held, Landlord
+        Registrations, Rent Collected (This FY), Pending Invoices (This Month), Pending Bills (This Month),
+        Overdue Reminders, Uncleared Cheques (₹ Total), and Advance Tax Shortfall (Next Due, ₹ Total).
+      </p>
+      <p class="admin-help">
+        <strong>Rent Status</strong> and the rent-related <strong>KPI Cards</strong> need one more field mapped
+        under <span class="admin-hint">Admin &rarr; Tax Settings</span> beyond what Tax itself needs &mdash;
+        <em>Invoice Rent Received</em>, the field that actually holds the amount received against an invoice,
+        since Tax's own computation only needs the accrual amount, not whether it's been paid yet. Leave it
+        unmapped and those two widgets simply don't show, the same "fails quietly by just not appearing" rule
+        every widget follows rather than showing broken or wrong numbers &mdash; a widget needing a permission
+        you don't have, or reading a table that doesn't exist, behaves exactly the same way.
+      </p>
+      <p class="admin-help">
+        The same widget type can be added more than once &mdash; two separate Quick Actions widgets with a
+        different table list each, say &mdash; nothing limits a type to appearing only once.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Reports</strong> &mdash; <span class="admin-hint">Admin &rarr; Reports</span></p>
+      <p class="admin-help">
+        The most powerful, and most involved, feature in this app &mdash; genuinely worth its own detailed
+        walkthrough rather than a one-paragraph summary, since it's easy to build something powerful here and
+        then get lost in your own naming a few weeks later. Everything below is worked through with a real
+        example built from actual fields on the real Invoices/Tenants tables, not abstract placeholders.
+      </p>
+
+      <p class="admin-help">
+        A report has exactly two modes, chosen by whether you fill in <strong>Group By</strong> or not:
+      </p>
+      <table class="list-table prose">
+        <thead><tr><th style="width:110px">Mode</th><th>What it produces</th></tr></thead>
+        <tbody>
+          <tr class="row-even"><td><strong>Detail</strong></td><td>One row per matching record, one column per thing you've configured under "Columns" &mdash; e.g. one row per Invoice.</td></tr>
+          <tr class="row-odd"><td><strong>Grouped</strong></td><td>One row per distinct value of whatever you group by (e.g. one row per Tenant), with Sum/Count/Average/Min/Max aggregates instead of raw columns &mdash; e.g. "total rent collected, per tenant."</td></tr>
+        </tbody>
+      </table>
+
+      <p class="admin-help">
+        <strong>Condition (WHERE)</strong>, a separate idea from Parameters worth not confusing with it: a fixed
+        filter you set once when building the report, that always applies for everyone who runs it &mdash; e.g.
+        <code>I_RentRecd &lt; I_TotalBill</code> to permanently scope this report down to "invoices not yet fully
+        paid," regardless of who runs it or what they pick. A Parameter, by contrast, is something the person
+        running the report chooses fresh each time (which tenant, which date range). The two combine naturally:
+        Condition narrows down what the report is fundamentally <em>about</em>; Parameters narrow down which
+        specific slice of that someone wants to see <em>right now</em>.
+      </p>
+
+      <p class="admin-help">
+        <strong>Building a Detail report: every invoice for one tenant, billed vs. received, in date order.</strong> This is genuinely the exact report behind the Tenant Summary shown earlier. Building it:</p>
+      <ol class="admin-help" style="padding-left:20px;">
+        <li><strong>Base Table</strong>: Invoices. Can never be changed after saving &mdash; every expression in the whole report is written against this table, so a new report is needed instead of switching it later.</li>
+        <li><strong>Columns</strong> &mdash; each row is one column, with five things: an <strong>Expression</strong> (the actual formula, same language as everywhere else &mdash; a bare field like <code>I_SeriesNo</code>, or a cross-table one like <code>tenants.T_Name</code>), a <strong>Column Label</strong> (defaults to the expression itself if left blank &mdash; almost always worth setting, since <code>I_SeriesNo</code> is not what you want printed as a header), a <strong>Tag Key</strong> (optional &mdash; only matters once a PDF template references this report; see the Formula/Tag Reference page for why this exists and when it's worth setting), a <strong>Format</strong> (Currency/Percent/Date/etc. &mdash; purely display, doesn't change the underlying value), and <strong>Total</strong> (a checkbox). Concretely, the columns behind the screenshot: <code>I_SeriesNo</code> labeled "Inv #", <code>I_Date</code> labeled "Bill Date" formatted Date, <code>I_BaseRent</code> labeled "Base Rent" formatted Currency with Total checked, <code>I_CGSTAmt</code>/<code>I_SGSTAmt</code> labeled "CGST"/"SGST" formatted Currency with Total checked, <code>I_RentRecd</code>/<code>I_RentRecdDate</code>, <code>I_GSTRecd</code>/<code>I_GSTRecdDate</code>.</li>
+        <li><strong>Why Total is only allowed on Currency/Percent/Number columns</strong>: an arbitrary expression's result type genuinely can't be known ahead of time without actually running it (the formula engine doesn't do static type inference), so Format doubles as your explicit declaration "this really is a number" &mdash; ticking Total on a text or date column fails loudly at save time rather than silently producing a nonsense sum.</li>
+      </ol>
+
+      <p class="admin-help"><strong>Worked example &mdash; the same idea in Grouped mode instead: total rent collected per tenant, this financial year.</strong></p>
+      <ol class="admin-help" style="padding-left:20px;">
+        <li><strong>Group By</strong>: <code>tenants.T_Name</code>, with <strong>Group Column Label</strong> "Tenant" &mdash; this becomes the report's first column, one row per distinct tenant name.</li>
+        <li><strong>Aggregates</strong> replace Columns entirely once Group By is filled in &mdash; each row here is one aggregate, with an <strong>Expression</strong>, a <strong>Function</strong> (SUM/COUNT/AVG/MIN/MAX), a <strong>Label</strong>, a <strong>Format</strong>, and <strong>Total</strong> (a grand total across every group, not just within one). Concretely: expression <code>I_BaseRent</code>, function SUM, label "Total Rent", format Currency, Total checked &mdash; gives one row per tenant showing that tenant's rent summed across every one of their invoices.</li>
+        <li><strong>Why Total is only allowed on SUM and COUNT aggregates, not AVG/MIN/MAX</strong>: a grand total works by re-summing each group's own already-computed value &mdash; that's mathematically valid for a sum of sums, or a sum of counts, but averaging several groups' averages together isn't the same number as the true overall average (and the same problem applies to re-taking the min/max of several groups' own mins/maxes). Ticking Total on an AVG/MIN/MAX aggregate fails loudly at save time rather than quietly producing a number that looks plausible but is actually wrong.</li>
+      </ol>
+
+      <p class="admin-help"><strong>Parameters &mdash; letting whoever runs the report choose something at that moment</strong>, rather than you fixing it in advance. This is also where the naming (Anchor Table, Anchor Resolver) that's caused confusion actually lives, so it's worked through in full below with the real Tenant Summary example, not just defined abstractly.</p>
+      <p class="admin-help">
+        Every parameter row has a <strong>Parameter Key</strong> (an internal short name, e.g. <code>tenant</code>), a
+        <strong>Label</strong> (what the person running the report actually sees, e.g. "Tenant Root"), and a
+        <strong>Field</strong> (the expression whose value they're choosing/filtering by, e.g.
+        <code>I_TenantCode.T_GroupRoot</code>). A plain field or one clean cross-table hop like that one
+        auto-detects its own type from the schema &mdash; nothing more to configure. A genuinely calculated
+        expression (like <code>I_BaseRent - I_RentRecd</code>, "how much is still owed") has no schema field to
+        read a type from, so it needs an explicit <strong>Data Kind</strong> (Text / Yes-No / Date range / Number
+        range / Percent range) &mdash; declaring up front what kind of value it produces, the same "explicit,
+        not guessed" principle Format uses for Columns.
+      </p>
+
+      <p class="admin-help">
+        <strong>Anchor Table, explained via the real Tenant Root parameter</strong>: this parameter's Field is
+        <code>I_TenantCode.T_GroupRoot</code> &mdash; a plain text value (a group-tag string like
+        <code>SGHUF_HPCL</code>), not a real lookup (fk) field pointing at a table. A genuine fk field already
+        knows which table it links to, straight from the schema &mdash; nothing to declare. But a plain value
+        like a group tag doesn't carry that information on its own, and the Header Panel below needs to know
+        "this value identifies something on the Tenants table" to be able to show that tenant's details at all.
+        Anchor Table is exactly that missing declaration &mdash; set to <strong>tenants</strong> here, it tells
+        the report "treat this parameter's value as identifying a row on the Tenants table."
+      </p>
+      <p class="admin-help">
+        <strong>Anchor Resolver, explained via the same parameter</strong>: knowing "this value identifies a
+        Tenants row" still isn't quite enough on its own, because <code>T_GroupRoot</code> is deliberately
+        <em>shared</em> by every revision of the same tenant (see Step 4 above &mdash; a tenant that's had two
+        rent revisions has three real rows, all sharing one <code>T_GroupRoot</code>). Picking "SGHUF_HPCL" as
+        Tenant Root doesn't by itself say <em>which one</em> of those rows to show in the Header Panel. Anchor
+        Resolver is a condition &mdash; same formula language as everywhere else &mdash; that picks exactly one:
+      </p>
+      <p class="admin-help" style="font-family:monospace; background:#f7f6f0; padding:8px 10px; border:1px solid var(--border-dark);">
+        tenants.T_GroupRoot = ANCHOR.VALUE AND tenants.T_IsCurrent = true
+      </p>
+      <p class="admin-help">
+        Read as: <em>"find the Tenants row whose own T_GroupRoot matches whatever value this parameter actually
+        got (that's what <code>ANCHOR.VALUE</code> means &mdash; a stand-in for 'the parameter's own raw value',
+        injected here the same way a rollup's <code>parent.field</code> or LOOKUP's own scanned-row syntax work
+        elsewhere), and which is marked as the currently active revision."</em> Left blank, Anchor Resolver falls
+        back to treating the parameter's raw value as a direct primary-key lookup instead &mdash; correct for a
+        real fk parameter (a tenant code that's already unique on its own), but wrong for a shared tag like
+        Tenant Root, which is exactly why this specific parameter needs one set explicitly.
+      </p>
+
+      <p class="admin-help">
+        <strong>The Header Panel itself</strong>, continuing the same example: a block of read-only fields shown
+        above the results table, evaluated once against whatever single record the chosen Anchor Parameter
+        resolves to. Each row is an <strong>Expression</strong> evaluated against that anchor record (so, written
+        as if looking directly at a Tenant record &mdash; <code>T_Name</code>, <code>T_BillingAddr</code>, not
+        <code>I_TenantCode.T_Name</code>), a <strong>Label</strong>, a <strong>Type</strong> (Text for a single
+        line, Textarea for a multi-line address), a <strong>Format</strong>, and which <strong>Column</strong>
+        (Left/Right) it appears in &mdash; matching "Tenant Name"/"Tenant Address"/"Tenant PAN"/"Tenant GSTIN" on
+        the left and "Tenant Associated To" on the right in the screenshot. Only parameters with a resolved
+        Anchor Table (whether auto-detected from a real fk, or set explicitly as above) are offered as the
+        Anchor Parameter choice at all &mdash; a report can only have a Header Panel once at least one of its
+        parameters actually identifies something to anchor it to.
+      </p>
+
+      <p class="admin-help">
+        <strong>Running a report</strong> (Reports tab, not Admin): each parameter shows a different input
+        depending on its type &mdash; a real lookup (fk) or Picklist field gets a proper dropdown; a date-range or
+        number/percent-range parameter gets two boxes (From/To); anything else gets a plain "exact match" text
+        box. <strong>Export CSV</strong> downloads exactly what's currently on screen, respecting whatever
+        parameters are currently selected.
+      </p>
+      <p class="admin-help">
+        <strong>One dropdown detail worth knowing about specifically for something like Tenant Root</strong>: that
+        parameter's Field (<code>I_TenantCode.T_GroupRoot</code>) resolves to <code>T_GroupRoot</code> itself,
+        which is a self-referential fk &mdash; it points back at the Tenants table, the same table it lives on,
+        since it's the shared group tag across every revision of one tenant (see Step 4 above), not a genuine
+        per-row identifier. The dropdown accounts for this: rather than listing every individual tenant revision
+        as its own option (which would offer, say, both "2024's rent" and "2025's rent" as separate choices for
+        what's really one tenant, and picking the wrong one used to silently return "No matching records" even
+        though it looked like a perfectly reasonable choice), it collapses each shared tag down to one option,
+        labeled using whichever revision was entered most recently.
+      </p>
+
+      <p class="admin-help">
+        <strong>Who can run a report</strong>: whoever has read permission on the report's own Base Table &mdash;
+        the same permission that controls whether someone can see that table's records directly, not a separate
+        "reports" permission of its own. Someone without read access to Invoices can't run a report built on
+        Invoices, and gets a clear message saying exactly that rather than a confusing empty result.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>List Totals</strong> &mdash; <span class="admin-hint">Admin &rarr; Views &rarr; pick a table &rarr; List Totals</span></p>
+      <p class="admin-help">
+        Turns on the Totals row described in Step 8. Pick any Number/Currency/Percent field and a function
+        (Sum/Average/Max/Min) &mdash; add as many as you like, e.g. Sum of Amount <em>and</em> Average of Amount
+        on the same list at once. Note: "Views" here means the per-table display settings page (columns, filters,
+        sort, totals) &mdash; a different thing from "Views (Applet-based)" further down this table, despite the
+        near-identical name; see Custom Screens below for that one.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Read-only fields &amp; Default values</strong> &mdash; <span class="admin-hint">Admin &rarr; [table] &rarr; Edit Fields</span></p>
+      <p class="admin-help">
+        Any field can be set to <strong>Never / Always / After Creation</strong> read-only, and separately given
+        a <strong>default value</strong> &mdash; either a fixed value (e.g. a Status field always starting as
+        "Pending"), or a formula evaluated fresh each time a new record is created (e.g. a Date field defaulting
+        to <code>TODAY()</code>, so it's always today's date unless someone changes it). "After Creation" is the
+        common choice for something like an opening balance &mdash; editable once when the record is first made,
+        then locked from then on so it can't be accidentally changed later. Both are configured together in each
+        field's own row on the Edit Fields page.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Global Picklists</strong> &mdash; <span class="admin-hint">Admin &rarr; Picklists</span></p>
+      <p class="admin-help">
+        A reusable dropdown value list, shared across any number of fields on any number of tables, instead of
+        typing the same options separately into each one. Two kinds:
+      </p>
+      <table class="list-table prose">
+        <thead><tr><th style="width:140px">Kind</th><th>How it works</th></tr></thead>
+        <tbody>
+          <tr class="row-even">
+            <td>Static</td>
+            <td>A plain list you type yourself once (e.g. Payment Method: UPI ID, Bank Account, Cheque), used
+            wherever that same list is needed across any table.</td>
+          </tr>
+          <tr class="row-odd">
+            <td>Table-sourced, optionally constrained</td>
+            <td>Options come live from an actual table's data instead of a typed list &mdash; e.g. every card
+            name in a Banking table. This kind can also be <strong>constrained</strong>: narrowing which options
+            show up based on another field on the record being edited. Concretely: a Credit Cards picklist
+            sourced from Banking, constrained by Banking's own Account Type field &mdash; when someone picks
+            "Credit" in a Payment's own Account Type field first, the Card picklist immediately narrows to only
+            show Credit cards, not Savings ones, updating live as that Account Type choice changes.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="admin-help">
+        <strong>Renaming a value is safe.</strong> Each option (in a Global Picklist's Values list, or in a
+        per-field Custom picklist) has its own hidden, stable identity separate from the text you type. Editing
+        that text later &mdash; fixing a typo, rewording something &mdash; never breaks records that already
+        picked it: they keep pointing at the same option and simply show its current wording everywhere (the
+        record, lists, reports, exports). To retire an option instead of renaming it, uncheck its
+        <strong>Active</strong> box &mdash; existing records keep showing it, but it stops being offered as a new
+        choice.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Template Library</strong> &mdash; <span class="admin-hint">Admin &rarr; Templates</span></p>
+      <p class="admin-help">
+        Where PDF bill/invoice templates (Step 10 above) are designed &mdash; one per table. Pick a table, start
+        from a built-in layout ("GST Invoice" or "Rent Receipt") or a blank one, then edit the HTML directly using
+        <code>{{FieldName}}</code>-style tags to pull in real data &mdash; click a field in the sidebar to insert
+        its tag rather than typing it by hand. A tag can also reach across a linked table, e.g.
+        <code>{{BILLS_ClientCode.T_Name}}</code> pulls the tenant's name straight from a bill's own record,
+        and <code>{{BILLS_ClientCode.T_MappedTo.LL_Display}}</code> reaches two hops further to that tenant's own
+        landlord's display name &mdash; exactly how the worked example in Step 10 above actually pulled the
+        landlord's details onto the invoice. Use "Preview HTML in New Tab" against a real record while editing to
+        check it looks right before generating an actual PDF. The full tag syntax is also documented on the
+        <a href="/admin/help?view=formula-reference">Formula Language Reference</a> page.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Custom Screens (Applets, Views, Screens)</strong> &mdash; <span class="admin-hint">Admin &rarr; Applets / Views (Applet-based) / Screens</span></p>
+      <p class="admin-help">
+        A way to build an entirely custom page combining data from multiple tables &mdash; e.g. one screen
+        showing a Landlord's own details alongside their Tenants, Banking, and Bills, all on the same page, with
+        selecting a Landlord narrowing the others to just that landlord's own related records. Three layers,
+        built in order, each one built on top of the last:
+      </p>
+      <table class="list-table prose">
+        <thead><tr><th style="width:120px">Layer</th><th>What it is</th><th>Concretely</th></tr></thead>
+        <tbody>
+          <tr class="row-even">
+            <td><strong>Applet</strong></td>
+            <td>A single, reusable block of one table's data &mdash; its columns, filter, and sort, packaged
+            together as one named thing.</td>
+            <td>A "Tenants List" applet: base table Tenants, columns Client Code/Name/Rent, sorted by Client Code.</td>
+          </tr>
+          <tr class="row-odd">
+            <td><strong>View (Applet-based)</strong></td>
+            <td>Combines one or more Applets, optionally linking them master-detail style &mdash; selecting a row
+            in one Applet filters what shows in another.</td>
+            <td>A view combining the "Landlords List" applet with the "Tenants List" applet, linked so picking a
+            landlord row filters the tenant list to just that landlord's own tenants.</td>
+          </tr>
+          <tr class="row-even">
+            <td><strong>Screen</strong></td>
+            <td>Combines one or more Views into an actual page with its own tab in the main navigation.</td>
+            <td>A "LL CustScreen" screen showing that combined Landlord/Tenant view, reachable as its own tab
+            right alongside Landlords, Tenants, and Payments in the main navigation.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="admin-help">
+        Worth being careful about the name here: "Views (Applet-based)" is this Custom Screens layer &mdash; a
+        completely different thing from the plain "Views" mentioned under List Totals above, which is really
+        just a single table's own display settings. They happen to share a name; they don't share anything else.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>CSV Import</strong> &mdash; <span class="admin-hint">Admin &rarr; pick a table &rarr; Import CSV</span></p>
+      <p class="admin-help">
+        Bulk-load records from a CSV file. Validates every row before committing anything &mdash; either the
+        whole file imports cleanly, or nothing does, so a bad file never leaves a table half-loaded partway
+        through. See Step 9 above for undoing an import afterward if something about it turns out to be wrong.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Backup</strong> &mdash; <span class="admin-hint">Admin &rarr; Backup</span></p>
+      <p class="admin-help">
+        Take a manual backup (Download Backup ZIP) before any big change you're unsure about &mdash; restoring an
+        old one is straightforward if something goes wrong. A full backup also happens
+        <strong>automatically</strong> once a day with no action needed, keeping the last 7 days &mdash; those
+        are listed on this same page with their own download links, as an extra safety net beyond remembering to
+        click the manual button yourself.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Audit Log</strong> &mdash; <span class="admin-hint">Admin &rarr; Audit Log</span></p>
+      <p class="admin-help">
+        A history of who changed what and when &mdash; both everyday record changes (create/update/delete, for
+        tables with auditing turned on) and, separately, changes to the tables and fields themselves. Concretely:
+        if a field's type gets changed from Currency to Text and a report that used to work suddenly shows
+        errors, the Audit Log shows exactly when that type change happened and who made it &mdash; the specific
+        kind of thing that's otherwise very hard to track down after the fact.
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Users &amp; Permissions</strong> &mdash; <span class="admin-hint">Admin &rarr; Users</span></p>
+      <p class="admin-help">
+        Add other people who need access, and control exactly which tables each person can read, create, update,
+        or delete records in &mdash; useful if not everyone using this app should see or touch everything (e.g. a
+        bookkeeper who should see Payments but never delete a Landlord record).
+      </p>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <p class="admin-help"><strong>Session Timeout</strong> &mdash; <span class="admin-hint">Admin &rarr; Session</span></p>
+      <p class="admin-help">
+        How long someone can stay logged in without any activity before being signed out automatically.
+      </p>
+    </div>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Dos and Don'ts &mdash; Quick Reference</span></div>
+    <p class="admin-help">
+      Everything below is explained in full, with a real example, somewhere earlier on this page &mdash; this is
+      just the short list to glance back at once the concepts themselves are familiar, not a substitute for
+      reading those sections the first time.
+    </p>
+    <table class="list-table prose">
+      <thead><tr><th style="width:70px"></th><th>Rule</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><strong>Do</strong></td><td>Create a <em>new</em> Tenant (or Landlord) row when terms genuinely change &mdash; a rent increase, a renewal, a new state registration. See Step 4.</td></tr>
+        <tr class="row-odd"><td><strong>Don't</strong></td><td>Edit an existing Tenant/Landlord record's own terms in place to reflect a change &mdash; every old Invoice linked to it would suddenly look like it used the new terms too.</td></tr>
+        <tr class="row-even"><td><strong>Do</strong></td><td>Set every new revision's own <code>T_GroupRoot</code> and flip <code>T_IsCurrent</code> on the new one (and off the old one) &mdash; both, every time, not just one. See Step 4.</td></tr>
+        <tr class="row-odd"><td><strong>Don't</strong></td><td>Expect a lookup field's dropdown to offer a record that doesn't exist yet &mdash; a brand-new revision can't point its own Group field at itself until it's been saved once already. Save blank first, then edit and set it.</td></tr>
+        <tr class="row-even"><td><strong>Do</strong></td><td>Set Property's own <strong>State</strong> field correctly and keep it current &mdash; it's what decides CGST+SGST vs. an out-of-state GST treatment, and (for a multi-registered landlord) which of their registrations actually applies.</td></tr>
+        <tr class="row-odd"><td><strong>Don't</strong></td><td>Assume a multi-state landlord's "pick the right registration by property state" happens automatically today &mdash; <code>LL_GroupRoot</code> is real, but the actual state-matching lookup isn't wired up yet. See Step 1/4.</td></tr>
+        <tr class="row-even"><td><strong>Do</strong></td><td>Take a manual backup (Admin &rarr; Backup) before any change you're genuinely unsure about.</td></tr>
+        <tr class="row-odd"><td><strong>Don't</strong></td><td>Panic over a deleted record &mdash; it sits in that table's Trash for 30 days and can be restored, unless it's already been permanently removed from there.</td></tr>
+        <tr class="row-even"><td><strong>Do</strong></td><td>Expect a record still referenced by something else (a Landlord with Tenants still pointing at it) to refuse deletion, soft or permanent, with a clear message naming what's blocking it &mdash; reassign or remove those references first.</td></tr>
+        <tr class="row-odd"><td><strong>Do</strong></td><td>Treat a Tax Worksheet's output as a real estimate to work from &mdash; verify slab/surcharge/cess rates and the final numbers with an actual auditor before filing or paying based on them.</td></tr>
+        <tr class="row-even"><td><strong>Don't</strong></td><td>Expect a Report's <strong>Base Table</strong> to be changeable after saving &mdash; every expression in that report is written against it; build a new report instead of trying to repoint an existing one.</td></tr>
+        <tr class="row-odd"><td><strong>Do</strong></td><td>Set a Column/Aggregate's own <strong>Format</strong> honestly (Currency/Percent/Number) on anything you want to total &mdash; it's how the report knows a value is really numeric, since the formula engine can't infer that on its own ahead of time.</td></tr>
+        <tr class="row-even"><td><strong>Don't</strong></td><td>Expect to tick <strong>Total</strong> on an AVG/MIN/MAX aggregate, or on a non-numeric column &mdash; both are blocked at save time on purpose, since re-averaging several groups' own averages (or re-taking the min/max of several mins/maxes) isn't mathematically the same as the true overall figure.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Formula Fields, If You Need Them</span></div>
+    <p class="admin-help">
+      If you want to calculate something new &mdash; a field that derives its value from others, sums a related
+      table, or looks something up &mdash; that's what <strong>formula</strong> and <strong>rollup</strong>
+      fields are for (set up on the Edit Fields page for a table, same place as read-only/default values). Both
+      LOOKUP examples worked through in Step 4 above use this exact same language. The full syntax available is
+      documented in full on the <a href="/admin/help?view=formula-reference">Formula Language Reference</a> page &mdash; the same
+      expression language is also used in Report conditions and aggregates.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Email</span></div>
+    <p class="admin-help">
+      The app can send email over SMTP. There are three parts:
+    </p>
+    <ol class="admin-help">
+      <li><strong>Connect a mailbox</strong> &mdash; <span class="admin-hint">Admin &rarr; Email Settings</span>. Enter your provider's SMTP host, port, from-address and password (a Gmail app-password, your domain's SMTP, or an SES/SendGrid SMTP endpoint all work). The password is stored outside the schema and is never in a backup. Use <strong>Send Test Email</strong> to confirm it works. Note: whether mail lands in the inbox (SPF/DKIM/from-domain reputation) is set up with your mail provider, not here.</li>
+      <li><strong>Write email templates</strong> &mdash; <span class="admin-hint">Admin &rarr; Templates &rarr; + New Template &rarr; kind &ldquo;Email&rdquo;</span>. An email template is bound to a table and holds the recipient (To/Cc/Bcc), subject and body. All of them use the same <code>{{merge tags}}</code> as PDF templates: <code>{{Field}}</code> for a field on the record, <code>{{Related.Chain.Field}}</code> to reach across an fk (e.g. a tenant's email from an invoice). You can create several per table.</li>
+      <li><strong>Send from a record</strong> &mdash; open any record of that table and click the <em>&#9993; &lt;template name&gt;</em> button. The template is resolved against that record and shown in a preview where you can edit the recipient, subject and body before it goes out. Every send is recorded in the <a href="/email_log">Email Log</a>.</li>
+    </ol>
+    <p class="admin-help">
+      Optionally, tick <strong>Notification channel</strong> in Email Settings and set a <strong>Notify email to</strong>
+      address to also receive the app's notification alerts (reminders due, bills due, &hellip;) by email &mdash; the same
+      sources you enable in <span class="admin-hint">Admin &rarr; Notifications</span> are then delivered to your inbox as
+      well as (or instead of) Telegram.
+    </p>
+    <p class="admin-help">
+      <strong>Permission:</strong> sending is gated by a per-table <strong>Email</strong> permission (Admin &rarr; Users), separate
+      from Read &mdash; so being able to <em>view</em> a record no longer lets someone email it out. The Email column appears only
+      for tables that have email templates; administrators can always send. The &#9993; button is hidden for users without the
+      permission, and the send endpoint refuses them directly. (Changed in v3.11.0: previously Read implied the ability to send.)
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Notifications (Telegram &amp; Email)</span></div>
+    <p class="admin-help">
+      The app can push alerts to you when something needs attention &mdash; a reminder coming due, a bill that
+      hasn't been paid, a rent shortfall. Two delivery channels exist: <strong>Telegram</strong> (a bot sends
+      messages to a chat) and <strong>Email</strong> (if you've set up SMTP above). Both are configured on one
+      page: <span class="admin-hint">Admin &rarr; Notifications</span>.
+    </p>
+    <ol class="admin-help">
+      <li><strong>Enable notifications</strong> &mdash; tick the master <strong>Enabled</strong> checkbox at the top of the page.</li>
+      <li><strong>Set up Telegram</strong> &mdash; create a bot via <a href="https://t.me/BotFather" target="_blank">@BotFather</a> on Telegram, paste the token into the Token field, and click <strong>Check Connection</strong>. Then add a chat (a group or your personal chat) by entering its Chat ID &mdash; the bot sends alerts there.</li>
+      <li><strong>Choose what to send</strong> &mdash; the <strong>Sources</strong> table lets you enable/disable each alert type (reminders due, bills due, rent shortfalls, etc.) and choose <strong>Immediate</strong> (sends the moment the condition is true) or <strong>Digest</strong> (batches everything into one daily summary). The <strong>Preview</strong> at the bottom shows exactly what the next alert run would produce, so you can verify before waiting for a real event.</li>
+      <li><strong>Email as a channel</strong> &mdash; in the <strong>Email Settings</strong> card below Telegram, tick <strong>Email the notification sources too</strong> and enter a <strong>Notify email to</strong> address. The same sources you enabled above will also be delivered by email. You can use email alone (no Telegram token needed), Telegram alone, or both.</li>
+    </ol>
+    <p class="admin-help">
+      <strong>Delivery log:</strong> every send attempt (success or failure, with the reason) is recorded in
+      <a href="/notification_log">Admin &rarr; Notification Log</a>. Old log rows are automatically purged after the
+      configured retention period (default 90 days for both notification and email logs).
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Custom Views, Screens &amp; Applets</span></div>
+    <p class="admin-help">
+      The normal table pages (Landlords, Tenants, etc.) each show one table as a list. <strong>Custom Views</strong>
+      let you compose richer layouts &mdash; a list of landlords at the top, with the selected landlord's detail
+      form below, and their tenants and invoices filtering live underneath. This is the same <strong>list-form
+      pattern</strong> used in enterprise apps like Siebel, and it's built on three concepts:
+    </p>
+    <ol class="admin-help">
+      <li><strong>Applets</strong> (<span class="admin-hint">Admin &rarr; Applets</span>) &mdash; a building block, either a <strong>List</strong> (a table of records with configurable columns) or a <strong>Detail</strong> (a form showing one record's fields). Each applet is bound to one table. Create applets first.</li>
+      <li><strong>Views</strong> (<span class="admin-hint">Admin &rarr; Views</span>) &mdash; a named arrangement of applet instances, stacked top to bottom. Each row in a View is one applet instance. To make a master-detail pair, set a child instance's <strong>Parent Row</strong> to the row number of the applet above it; the child then shows only records related to whatever's selected in the parent. <strong>Link Field</strong> is the field on the child's table that matches the parent's selected record &mdash; but if both applets are on the <em>same</em> table, you can leave Link Field blank and it auto-links by primary key.</li>
+      <li><strong>Screens</strong> (<span class="admin-hint">Admin &rarr; Screens</span>) &mdash; a named page that holds one or more Views as tabs. A Screen appears in the sidebar navigation. If a Screen has multiple Views, they show as tabs at the top of the page.</li>
+    </ol>
+    <p class="admin-help">
+      <strong>How selection works:</strong> click a row in a list applet and the page reloads with that record
+      selected (highlighted). Every child applet below it re-filters to show only related data. The detail
+      applet shows the selected record's fields in a two-column form layout, identical to the normal record
+      detail page. If the detail applet is editable (you have Update permission on its table), each field is an
+      input and a <strong>Save</strong> button appears at the bottom. After saving, the page reloads with
+      the same selection preserved, and a "Record saved" banner confirms the change.
+    </p>
+    <p class="admin-help">
+      <strong>The detail applet toolbar</strong> matches the normal record page: <strong>&larr;/&rarr;</strong>
+      buttons step through the parent list's rows one by one, <strong>&larr; Back to List</strong> clears the
+      selection, <strong>Edit Fields</strong> links to the admin fields page, <strong>Duplicate</strong> opens a
+      new record pre-filled from this one, and <strong>Delete</strong> (with confirmation) removes the record.
+      All buttons respect permissions.
+    </p>
+    <p class="admin-help">
+      <strong>Detail field selection:</strong> by default, a detail applet shows every field on the table. To
+      show only specific fields (or reorder them), edit the applet in Admin &rarr; Applets and configure its
+      <strong>Detail Fields</strong> list &mdash; drag the handle to reorder, and pick which fields to include.
+      You can also add <strong>Spacer</strong> and <strong>Section Header</strong> rows for visual grouping,
+      without needing to add them to the table's own field list.
+    </p>
+    <p class="admin-help">
+      <strong>List applet features:</strong> each list applet has a <strong>+ New Record</strong> button, an
+      <strong>Edit Fields</strong> link, a <strong>Query</strong> search bar (filters rows instantly as you type,
+      client-side), and a record count. These match the normal list view's functionality.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Home Screen Widgets</span></div>
+    <p class="admin-help">
+      The Home page shows a configurable set of <strong>widgets</strong> &mdash; KPI cards, quick-action tiles,
+      report summaries, and more. You manage them in <span class="admin-hint">Admin &rarr; Home Screen</span>:
+      add, remove, reorder, and configure each widget from a single page.
+    </p>
+    <table class="list-table prose">
+      <thead><tr><th style="width:160px">Widget</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><strong>KPI Cards</strong></td><td>Shows numeric summaries (record count, sum, average) as colourful gradient cards across the top. Each metric is configurable.</td></tr>
+        <tr class="row-odd"><td><strong>Quick Actions</strong></td><td>Tile buttons for creating new records in your most-used tables &mdash; one click to start a new Invoice, Payment, etc.</td></tr>
+        <tr class="row-even"><td><strong>Report Card</strong></td><td>A mini table showing a report's output (like Receivables by Landlord) right on the Home page, with a link to the full report.</td></tr>
+        <tr class="row-odd"><td><strong>Bills Due</strong></td><td>Lists expense items that are currently due, based on their frequency and last payment. Each row is clickable &mdash; it opens that expense item's detail page.</td></tr>
+        <tr class="row-even"><td><strong>Advance Tax Next-Due</strong></td><td>Shows upcoming advance tax installments across all landlord groups. Columns are configurable (tick Landlord, FY, Installment, Shortfall in the widget's settings).</td></tr>
+        <tr class="row-odd"><td><strong>System Health</strong></td><td>Four cards: CPU usage, RAM usage, data storage size, and data health (table count, total rows, any tables with structural issues). Useful as an admin-only diagnostic on the Home page.</td></tr>
+        <tr class="row-even"><td><strong>Announcement</strong></td><td>A plain text message shown as-is &mdash; for notices, reminders, or seasonal greetings.</td></tr>
+      </tbody>
+    </table>
+    <p class="admin-help">
+      <strong>Configuring a widget:</strong> some widgets (marked with a gear icon in Admin &rarr; Home Screen) have
+      settings. Click the widget's row to expand its config form &mdash; for example, the Advance Tax widget lets
+      you choose which columns to show, and the Report Card widget lets you pick which report to display.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Bills Frequency</span></div>
+    <p class="admin-help">
+      Each Expense Item has a <strong>Frequency</strong> field &mdash; Monthly, Quarterly, Half-Yearly, Annual,
+      or Irregular. This controls when the item shows as "due" on the Home page and in notifications. Two
+      modes:
+    </p>
+    <table class="list-table prose">
+      <thead><tr><th style="width:120px">Mode</th><th>When it shows as due</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><strong>Floating</strong> (no Anchor Month set)</td><td>Due once it's been &ge; N months since the last entry. Self-anchoring &mdash; it drifts with your actual payment rhythm.</td></tr>
+        <tr class="row-odd"><td><strong>Anchored</strong> (Anchor Month set, e.g. "June")</td><td>Schedule is pinned to the calendar. Paying early or late <em>never drifts</em> the next due date &mdash; a "June quarterly" stays the June quarterly regardless of when you actually paid. Matches the Reminders module's "advance from the scheduled date, not the done date" philosophy.</td></tr>
+      </tbody>
+    </table>
+    <p class="admin-help">
+      <strong>Irregular</strong> items never auto-surface as due &mdash; use this for one-off or unpredictable
+      expenses that you still want tracked in the matrix but don't want triggering alerts.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">FK Constraints (Picker Filtering)</span></div>
+    <p class="admin-help">
+      Normally, a foreign-key dropdown shows <em>every</em> record in the referenced table. If that's too broad
+      &mdash; say you only want Active tenants in a picker, or only sub-landlords (not the group root) &mdash;
+      you can add a <strong>Constrain options &mdash; WHERE</strong> condition on the field in Admin &rarr;
+      Fields. This is a formula (the same language as formula fields) evaluated against each candidate row; only
+      rows where it returns true appear in the dropdown.
+    </p>
+    <p class="admin-help">
+      <strong>Static example:</strong> <code>T_Active = true</code> &mdash; only active tenants show in the picker.<br>
+      <strong>Dependent example:</strong> <code>T_Active = true AND T_MappedTo = parent.INV_Landlord</code> &mdash;
+      only active tenants <em>of the landlord chosen on this record</em>. The word <code>parent</code> refers to
+      the record being edited, so the dropdown updates live as you change other fields on the form. If the parent
+      field hasn't been set yet, the picker shows nothing (a clear "choose the parent first" signal rather than
+      showing everything).
+    </p>
+    <p class="admin-help">
+      <strong>Enforced on save, for anything newly chosen:</strong> even if someone bypasses the filtered picker
+      (e.g. by editing the URL or submitting a form directly), the constraint is re-checked when the record is
+      saved. A <em>newly chosen</em> value that doesn't pass the WHERE condition is rejected with a clear error.
+      <strong>Historical values are grandfathered in</strong>, though &mdash; if a record already had a value
+      before this edit and you don't touch that field, it stays exactly as it was, even if it no longer satisfies
+      today's condition. This matters because the world changes: a tenant who was active when an old invoice was
+      created might not be active anymore, but that shouldn't stop you from editing something else on that old
+      invoice years later. The condition only ever applies to a value being actively picked or changed right now.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Link Matching Records</span></div>
+    <p class="admin-help">
+      When many records share one "parent" the same way (e.g. every invoice from a landlord in a given month all
+      belong to that one GST Filing), picking the parent by hand on each child record gets repetitive once the
+      parent exists &mdash; the right answer is already fully determined by the same FK Constraint condition
+      already governing the picker. <strong>Link Matching Records</strong> automates this: one click links every
+      matching, currently-unlinked child record to the parent you're viewing.
+    </p>
+    <p class="admin-help">
+      <strong>Turning it on</strong> is per-relationship, not automatic &mdash; go to the child table's field in
+      Admin &rarr; Fields (e.g. Invoices &rarr; GSTR Link), and tick <strong>"Show a 'Link Matching &hellip;'
+      button&hellip;"</strong> next to its Constrain options &mdash; WHERE condition. (It only makes sense with a
+      WHERE condition set &mdash; without one, there'd be no "matching" logic to apply in bulk.) Once turned on,
+      a <strong>Link Matching &lt;Table&gt;</strong> button appears on the <em>parent</em> record's own page
+      (e.g. on a GST Filing, not on an Invoice).
+    </p>
+    <p class="admin-help">
+      <strong>What it does when clicked:</strong> finds every row on the child table that (a) doesn't already
+      have this field set, and (b) would satisfy the WHERE condition if linked to the record you're viewing
+      &mdash; then links them all in one action. It only ever fills in blanks; a record that's already linked
+      (even to something else) is never touched, so a manual override is always safe from being silently
+      overwritten by a bulk-link click.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">FK Peek (Related Record Info)</span></div>
+    <p class="admin-help">
+      When you select a value in a foreign-key dropdown on a record form, the app automatically fetches and
+      displays the related record's <strong>computed fields</strong> (formulas and rollups) right below the
+      picker. This is most useful for fields like "Last Paid Amount" or "Outstanding Balance" on a payee &mdash;
+      you see the payee's current numbers the moment you select them, without navigating away from the form
+      you're working on. This works generically on any fk field that points to a table with formula/rollup
+      fields.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Bulk Generate</span></div>
+    <p class="admin-help">
+      <span class="admin-hint">Admin &rarr; Bulk Generate</span> lets you create records in bulk from a source
+      table &mdash; for example, generating one invoice per active tenant for a given month, or one CC Tracker
+      entry per credit card. It's fully generic (not hardcoded to any specific tables) and works through saved
+      <strong>profiles</strong>:
+    </p>
+    <ol class="admin-help">
+      <li><strong>Create a profile</strong> &mdash; give it a name (e.g. "Monthly Invoices"), pick a <strong>Source Table</strong> (e.g. Tenants) and a <strong>Target Table</strong> (e.g. Invoices). Set a <strong>Source Filter</strong> formula (e.g. <code>T_Active = true</code>) to only include matching rows, and a <strong>Source Sort Field</strong> (e.g. <code>T_BillSequence</code>) to control the order records are created in.</li>
+      <li><strong>Map fields</strong> &mdash; add one row per field you want to fill in on the target record. Each mapping says "target field &larr; source field name (or a literal value)." For example: <code>INV_Tenant</code> &larr; <code>T_Client_Code</code>, <code>INV_Amount</code> &larr; <code>T_Invoice_Value</code>.</li>
+      <li><strong>Set dedup fields</strong> (optional) &mdash; if you set a <strong>Month Field</strong> (on the target), a <strong>Dedup Field</strong> (on the target), and a <strong>Dedup Source Field</strong>, the system skips any source row that already has a target record for that month. This makes the action <strong>idempotent</strong> &mdash; running it twice for the same month won't create duplicates.</li>
+      <li><strong>Run it</strong> &mdash; pick a month from the date picker and click <strong>Run</strong>. The system reports how many records were created and how many were skipped.</li>
+    </ol>
+    <p class="admin-help">
+      <strong>Tip:</strong> create a numeric "sequence" field on your source table (e.g. <code>T_BillSequence</code>
+      with values 1, 2, 3, &hellip;) and use it as the Sort Field. This gives you predictable, ascending bill
+      numbers in the generated records.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Themes</span></div>
+    <p class="admin-help">
+      Three visual themes are available: <strong>Classic</strong> (Siebel-inspired dark chrome with gold accents),
+      <strong>Lightning</strong> (Salesforce-style blue and white), and <strong>Coral</strong> (modern SaaS with
+      warm orange accents, rounded cards, and colourful gradient KPI cards). Switch themes in
+      <span class="admin-hint">Admin &rarr; Themes</span> &mdash; click a theme card to apply it immediately.
+      The choice is saved per-device in your browser, so each user/device can pick independently. The theme
+      affects the entire app's look without changing any data or functionality.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">PayQR (Payment QR Codes)</span></div>
+    <p class="admin-help">
+      If you've configured PayQR (<span class="admin-hint">Admin &rarr; PayQR Settings</span>), the Payment
+      detail page shows a scannable <strong>UPI QR code</strong> generated from the stored payee, amount, and
+      notes &mdash; no third-party dependency, rendered server-side. The QR encodes a standard UPI payment
+      intent that any UPI app (Google Pay, PhonePe, Paytm, etc.) can read. PayQR Settings maps which fields on
+      your Payments table hold the payee's UPI ID, the amount, and the narration &mdash; it's field-name
+      configuration, not hardcoded.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Backup &amp; Restore</span></div>
+    <p class="admin-help">
+      <span class="admin-hint">Admin &rarr; Backup</span> creates a downloadable snapshot of everything &mdash;
+      your schema (all table structures, formulas, templates, views, screens, widgets, settings) and all your
+      data. The backup is a ZIP file. <strong>Take one before any change you're unsure about</strong> &mdash;
+      especially before importing a CSV, reorganizing fields, or making bulk edits. Automated backups can also
+      be scheduled. <strong>Restore</strong> uploads a backup ZIP and replaces everything with its contents.
+      <em>This is destructive</em> &mdash; anything not in the backup is lost. Always keep recent backups in a
+      safe place outside the app.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">CSV Export</span></div>
+    <p class="admin-help">
+      Every list view has a <strong>&#8615; CSV</strong> button in the toolbar. It downloads the <strong>currently
+      filtered and sorted</strong> view as a CSV file (UTF-8 with BOM, so Excel opens it correctly). If you've
+      searched or filtered the list, only those records are exported &mdash; not the full table. This is the
+      fastest way to share a subset of data with your accountant or pull records into a spreadsheet for analysis.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">CSV Import &amp; Date Handling</span></div>
+    <p class="admin-help">
+      When importing a CSV (<span class="admin-hint">Admin &rarr; Tables &rarr; Import</span>, or the import
+      button on any table's list), <strong>dates are auto-converted</strong>. You don't need to reformat your
+      Excel dates into yyyy-mm-dd &mdash; the following formats are all accepted and normalized automatically:
+    </p>
+    <table class="list-table prose">
+      <thead><tr><th style="width:180px">Format</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr class="row-even"><td><code>dd-mm-yyyy</code> or <code>dd/mm/yyyy</code></td><td>15-08-2025, 15/08/2025</td></tr>
+        <tr class="row-odd"><td><code>yyyy-mm-dd</code></td><td>2025-08-15 (already ISO, passes through)</td></tr>
+        <tr class="row-even"><td><code>dd-Mon-yyyy</code></td><td>15-Aug-2025 (always unambiguous)</td></tr>
+        <tr class="row-odd"><td>Excel serial number</td><td>45884 (auto-detected if the cell is a 5-digit number)</td></tr>
+      </tbody>
+    </table>
+    <p class="admin-help">
+      For <strong>ambiguous dates</strong> like <code>03-05-2025</code> (is that May 3 or March 5?), a dropdown
+      on the import form lets you confirm: <strong>dd-mm-yyyy</strong> (Indian, selected by default) or
+      <strong>mm-dd-yyyy</strong> (US). Unambiguous formats are always auto-detected regardless. If a cell
+      can't be parsed as any date, the import stops with a clear error pointing to the row and field.
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">File Attachments</span></div>
+    <p class="admin-help">
+      Any table can have a <strong>file</strong> field (add it in <span class="admin-hint">Admin &rarr;
+      Fields</span>, type &ldquo;file&rdquo;). This lets you attach documents to records &mdash; lease PDFs,
+      ID proofs, photos, receipts, anything. On the record form, you'll see an upload control; once a file is
+      attached, it shows as a &#128206; download link. Files are stored under <code>data/uploads/</code>
+      on the server. You can remove an attached file by ticking the &ldquo;Remove file&rdquo; checkbox
+      and saving. File fields are excluded from CSV import/export (attach files manually on each record).
+    </p>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Admin Navigation</span></div>
+    <p class="admin-help">
+      The Admin panel uses a <strong>tree sidebar</strong> on the left, organized into groups: <strong>Data</strong>
+      (Tables, Views, Applets, Custom Views, Screens, and more), <strong>UI</strong> (Home Screen, Sidebar,
+      Session, Themes), and <strong>MiniApps</strong> (PayQR, Tax Settings). Standalone items (Notifications,
+      Users, Audit Log, Errors, Help) sit at the bottom. The tree is sticky &mdash; it stays visible as you
+      scroll the content on the right. On mobile, it collapses to a horizontal layout above the content.
+    </p>
+
+  </div>

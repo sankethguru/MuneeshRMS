@@ -1,0 +1,97 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'templates' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">New Template</span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/templates">&larr; Back to Template Library</a>
+    </div>
+  </div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <form class="detail-form" method="POST" action="/admin/templates">
+    <div class="field-grid">
+      <div class="field-row">
+        <label class="field-label">Template Name *</label>
+        <div class="field-value"><input type="text" name="label" required placeholder="e.g. GST Invoice"></div>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Based On *</label>
+        <div class="field-value">
+          <select name="baseKind" id="baseKindSelect" onchange="mlToggleBaseKind()">
+            <option value="table">A Table (one record at a time — e.g. one Invoice)</option>
+            <option value="report">A Report (e.g. Tenant Summary, generated for whatever's currently selected when you click Generate PDF)</option>
+            <option value="email">An Email (a message you send from a record — e.g. email an invoice to a tenant)</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row" id="tableBaseRow">
+        <label class="field-label">Table *</label>
+        <div class="field-value">
+          <select name="baseTable" id="baseTableSelect">
+            <option value="">&mdash; choose a table &mdash;</option>
+            <% entities.forEach(function(e){ %><option value="<%= e.key %>"><%= e.label %></option><% }); %>
+          </select>
+          <p class="admin-hint">Only one template per table right now &mdash; you'll get a clear error here if that table already has one.</p>
+        </div>
+      </div>
+      <div class="field-row" id="reportBaseRow" style="display:none;">
+        <label class="field-label">Report *</label>
+        <div class="field-value">
+          <select name="baseTable" id="baseReportSelect" disabled>
+            <option value="">&mdash; choose a report &mdash;</option>
+            <% reportDefs.forEach(function(r){ %>
+              <option value="<%= r.key %>" <%= !r.headerAnchorParam ? 'disabled' : '' %>><%= r.label %><%= !r.headerAnchorParam ? ' (no Header Panel set up yet — set one up first)' : '' %></option>
+            <% }); %>
+          </select>
+          <p class="admin-hint">Only reports with a Header Panel configured can generate a PDF — there needs to be one clear, single subject (e.g. a specific tenant) for the document to be "for." Only one template per report right now, same as tables.</p>
+        </div>
+      </div>
+      <div class="field-row" id="emailFieldsRow" style="display:none;">
+        <label class="field-label">Recipient &amp; Subject *</label>
+        <div class="field-value">
+          <input type="text" name="emailTo" placeholder="To — e.g. {{LL_email}} or {{BILLS_ClientCode.T_Email}}" style="width:100%;margin-bottom:6px;">
+          <input type="text" name="emailSubject" placeholder="Subject — e.g. Invoice {{BILLS_Number}}" style="width:100%;">
+          <p class="admin-hint">Use <code>{{merge tags}}</code> that resolve against the chosen table's record. You'll add the body (and Cc/Bcc) on the next screen.</p>
+        </div>
+      </div>
+      <div class="field-row" id="starterRow">
+        <label class="field-label">Start From</label>
+        <div class="field-value">
+          <select name="starter">
+            <option value="">Blank</option>
+            <% starters.forEach(function(s){ %><option value="<%= s.key %>"><%= s.label %> (starter layout)</option><% }); %>
+          </select>
+          <p class="admin-hint">Starter layouts use merge tags matching the Bills/Tenant/Landlord tables &mdash; pick "Blank" for any other table, or as a starting point you'll fully rewrite.</p>
+        </div>
+      </div>
+    </div>
+    <p class="admin-help">Save this first, then the full editor (HTML body, field picker, line items config) opens next.</p>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Create Template</button></div>
+  </form>
+</div>
+
+<script>
+  function mlToggleBaseKind() {
+    var kind = document.getElementById('baseKindSelect').value;
+    var isReport = kind === 'report';
+    var isEmail = kind === 'email';
+    // Email reuses the table (entity) selector for its base table.
+    document.getElementById('tableBaseRow').style.display = isReport ? 'none' : '';
+    document.getElementById('reportBaseRow').style.display = isReport ? '' : 'none';
+    document.getElementById('emailFieldsRow').style.display = isEmail ? '' : 'none';
+    document.getElementById('starterRow').style.display = (isReport || isEmail) ? 'none' : '';
+    // Both selects share the same "baseTable" name — a disabled form
+    // field is never submitted at all, so only the currently-visible one
+    // actually sends its value, no second field name to reconcile
+    // server-side.
+    document.getElementById('baseTableSelect').disabled = isReport;
+    document.getElementById('baseReportSelect').disabled = !isReport;
+  }
+  mlToggleBaseKind();
+</script>
+
+<%- include('../partials/foot') %>

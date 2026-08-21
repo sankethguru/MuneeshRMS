@@ -95,8 +95,13 @@
           </div>
         </div>
       <% } %>
+      <% var paramQS = Object.keys(paramValues).length ? '?' + Object.entries(paramValues).map(function(e){ return (typeof e[1] === 'object') ? [e[0]+'_from='+encodeURIComponent(e[1].from||''), e[0]+'_to='+encodeURIComponent(e[1].to||'')].join('&') : e[0]+'='+encodeURIComponent(e[1]); }).join('&') : ''; %>
       <div class="applet-toolbar" style="padding:8px 12px;">
-        <a class="btn btn-toolbar btn-mini" href="/reports/<%= def.key %>/export.csv<%= Object.keys(paramValues).length ? '?' + Object.entries(paramValues).map(function(e){ return (typeof e[1] === 'object') ? [e[0]+'_from='+encodeURIComponent(e[1].from||''), e[0]+'_to='+encodeURIComponent(e[1].to||'')].join('&') : e[0]+'='+encodeURIComponent(e[1]); }).join('&') : '' %>">Export CSV</a>
+        <a class="btn btn-toolbar btn-mini" href="/reports/<%= def.key %>/export.csv<%= paramQS %>">Export CSV</a>
+        <% if (hasPdfTemplate) { %>
+          <a class="btn btn-toolbar btn-mini" href="/reports/<%= def.key %>/generate-pdf<%= paramQS %>">Generate PDF</a>
+          <a class="btn btn-toolbar btn-mini" href="/reports/<%= def.key %>/preview-pdf<%= paramQS %>" target="_blank">Preview PDF Template</a>
+        <% } %>
       </div>
       <div class="list-table-wrap">
         <table class="list-table">

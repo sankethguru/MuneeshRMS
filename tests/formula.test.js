@@ -103,3 +103,37 @@ test('a genuine circular reference between two formula fields fails cleanly, not
   const result = schemaLib.evalFormula('CircA', schema, circularEntity, record, {}, 0);
   assert.ok(String(result).includes('circular reference'));
 });
+
+// ---- Boolean literals (TRUE/FALSE, any case) --------------------------------
+// The logical keywords AND/OR/NOT are uppercase, so uppercase TRUE/FALSE is a
+// natural expectation. Both cases must behave identically to lowercase, and a
+// quoted "TRUE" must stay a text comparison (string literals are protected).
+const flags = {
+  key: 'flags', label: 'Flags', pk: 'F_Code',
+  fields: [
+    { name: 'F_Code', type: 'text', key: true },
+    { name: 'F_On', type: 'bool' },
+  ],
+};
+function flagSchema() { return { entities: { flags } }; }
+const evalOn = (formula, val) => schemaLib.evalFormula(formula, flagSchema(), flags, { F_Code: 'r', F_On: val }, {}, 0);
+
+test('uppercase TRUE behaves identically to lowercase true', () => {
+  assert.strictEqual(evalOn('F_On = TRUE', true), true);
+  assert.strictEqual(evalOn('F_On = TRUE', false), false);
+  assert.strictEqual(evalOn('F_On = true', true), true);   // still works
+  assert.strictEqual(evalOn('F_On = True', true), true);   // mixed case too
+});
+
+test('uppercase FALSE and negation work', () => {
+  assert.strictEqual(evalOn('F_On = FALSE', false), true);
+  assert.strictEqual(evalOn('F_On = FALSE', true), false);
+  assert.strictEqual(evalOn('F_On != TRUE', false), true);
+  assert.strictEqual(evalOn('NOT F_On AND F_On = FALSE', false), true);
+});
+
+test('a quoted "TRUE" stays a text comparison, not a boolean', () => {
+  // If TRUE were converted inside strings, "TRUE" == "TRUE" would break.
+  assert.strictEqual(evalOn('"TRUE" = "TRUE"', true), true);
+  assert.strictEqual(evalOn('"TRUE" = "true"', true), false);
+});

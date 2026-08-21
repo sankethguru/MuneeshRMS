@@ -1,0 +1,38 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Bills — Monthly Matrix</span>
+    <div class="applet-toolbar">
+      <label class="bills-fy-label">Financial Year
+        <select id="bills-fy"></select>
+      </label>
+      <% if (canEdit) { %>
+        <label class="bills-fy-label">Entry Month
+          <select id="bills-entry-month"></select>
+        </label>
+        <button class="btn btn-toolbar" type="button" id="bills-save" disabled>Save Month</button>
+      <% } %>
+      <a class="btn btn-toolbar" href="/expense_items">Expense Items</a>
+      <a class="btn btn-toolbar" href="/expense_entries">Raw Entries</a>
+      <button class="btn btn-toolbar" type="button" onclick="location.reload()">&#8635; Refresh</button>
+    </div>
+  </div>
+
+  <div id="bills-status" class="bills-status" hidden></div>
+
+  <div class="bills-scroll">
+    <table class="list-table bills-table" id="bills-table">
+      <tbody>
+        <tr><td class="bills-empty">Loading&hellip;</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  window.BILLS_CAN_EDIT = <%- JSON.stringify(canEdit) %>;
+</script>
+<script src="/js/bills.js"></script>
+<%- include('partials/foot') %>

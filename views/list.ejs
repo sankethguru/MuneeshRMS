@@ -7,19 +7,54 @@
     <div class="applet-toolbar">
       <% if (canCreate) { %><a class="btn btn-toolbar" href="/<%= entity.key %>/new/form">+ New Record</a><% } %>
       <a class="btn btn-toolbar" href="/admin/<%= entity.key %>/fields">Edit Fields</a>
+      <a class="btn btn-toolbar" href="/admin/<%= entity.key %>/trash">Trash</a>
+      <a class="btn btn-toolbar" href="/admin/<%= entity.key %>/export.csv" title="Download filtered records as CSV">&#8615; CSV</a>
       <button class="btn btn-toolbar" type="button" onclick="location.reload()">&#8635; Refresh</button>
     </div>
   </div>
 
+  <%
+    // Builds a query string carrying forward the CURRENT q/filters/sort
+    // state, with the given overrides applied on top — used by every
+    // link on this page (sort headers, pagination) so clicking any one
+    // of them never silently loses the others.
+    function mlListUrl(overrides) {
+      var params = new URLSearchParams();
+      var effectiveQ = overrides.q !== undefined ? overrides.q : q;
+      if (effectiveQ) params.set('q', effectiveQ);
+      filterFields.forEach(function(f) {
+        var kind = filterKindFor(f);
+        if (kind === 'date-range' || kind === 'number-range') {
+          if (filterValues[f.name].from) params.set('f_' + f.name + '_from', filterValues[f.name].from);
+          if (filterValues[f.name].to) params.set('f_' + f.name + '_to', filterValues[f.name].to);
+        } else if (filterValues[f.name]) {
+          params.set('f_' + f.name, filterValues[f.name]);
+        }
+      });
+      var effectiveSort = overrides.sort !== undefined ? overrides.sort : sortField;
+      var effectiveDir = overrides.dir !== undefined ? overrides.dir : sortDir;
+      if (effectiveSort) { params.set('sort', effectiveSort); params.set('dir', effectiveDir || 'asc'); }
+      var effectivePage = overrides.page !== undefined ? overrides.page : page;
+      if (effectivePage && effectivePage !== 1) params.set('page', effectivePage);
+      var qs = params.toString();
+      return '/' + entity.key + (qs ? '?' + qs : '');
+    }
+    function mlSortHeaderUrl(fieldName) {
+      var newDir = (sortField === fieldName && sortDir === 'asc') ? 'desc' : 'asc';
+      return mlListUrl({ sort: fieldName, dir: newDir, page: 1 });
+    }
+  %>
+
   <form class="query-bar" method="GET" action="/<%= entity.key %>">
     <label for="q">Query:</label>
     <input type="text" id="q" name="q" value="<%= q %>" placeholder="Type to filter across visible columns and press Enter&hellip;" autocomplete="off">
+    <% if (sortField) { %><input type="hidden" name="sort" value="<%= sortField %>"><input type="hidden" name="dir" value="<%= sortDir %>"><% } %>
     <% if (filterFields.length > 0) { %>
       <button class="btn btn-query" type="button" onclick="mlToggleFilterPanel()">Filter<%= filtersActive ? ' \u25CF' : '' %></button>
     <% } %>
     <button class="btn btn-query" type="submit">Go</button>
-    <% if (q || filtersActive) { %><a class="btn btn-query" href="/<%= entity.key %>">Clear</a><% } %>
-    <span class="query-count"><%= rows.length %> record<%= rows.length === 1 ? '' : 's' %></span>
+    <% if (q || filtersActive || sortField) { %><a class="btn btn-query" href="/<%= entity.key %>?clear=1">Clear</a><% } %>
+    <span class="query-count"><%= totalCount %> record<%= totalCount === 1 ? '' : 's' %><%= totalPages > 1 ? ' (page ' + page + ' of ' + totalPages + ')' : '' %></span>
 
     <% if (filterFields.length > 0) { %>
     <div id="filterPanel" class="filter-panel" style="<%= filtersActive ? '' : 'display:none' %>">
@@ -36,8 +71,8 @@
           <% } else if (kind === 'exact' && f.type === 'picklist') { %>
             <select name="f_<%= f.name %>">
               <option value="">All</option>
-              <% picklistOptions(f).forEach(function(opt){ %>
-                <option value="<%= opt %>" <%= filterValues[f.name]===opt ? 'selected' : '' %>><%= opt %></option>
+              <% resolvePicklistOptions(entity, f).forEach(function(opt){ %>
+                <option value="<%= opt.key %>" <%= filterValues[f.name]===opt.key ? 'selected' : '' %>><%= opt.label %></option>
               <% }); %>
             </select>
           <% } else if (kind === 'exact' && f.type === 'fk') { %>
@@ -68,14 +103,16 @@
     </div>
     <% } %>
   </form>
+  <% if (listState && (listState.q || listState.sort || Object.keys(listState.filters || {}).length)) { %>
+    <p class="admin-hint" style="padding: 0 4px 8px;">Remembering your last query/filter/sort on this screen &mdash; use "Clear" above to reset it.</p>
+  <% } %>
 
   <div class="list-table-wrap">
-    <% var EXPAND_THRESHOLD = 12; %>
     <table class="list-table" id="mainListTable">
       <thead>
         <tr>
           <% listFields.forEach(function(f){ %>
-            <th><%= f.label %></th>
+            <th><a class="sort-header" href="<%= mlSortHeaderUrl(f.name) %>"><%= f.label %><%= sortField === f.name ? (sortDir === 'desc' ? ' \u25BC' : ' \u25B2') : '' %></a></th>
           <% }); %>
           <th class="col-actions">&nbsp;</th>
         </tr>
@@ -85,7 +122,7 @@
           <tr><td colspan="<%= listFields.length + 1 %>" class="empty-row">No records found. Query specified no matching rows.</td></tr>
         <% } %>
         <% rows.forEach(function(r, i){ %>
-          <tr class="data-row <%= i % 2 === 0 ? 'row-even' : 'row-odd' %> <%= i >= EXPAND_THRESHOLD ? 'row-collapsed' : '' %>" style="<%= i >= EXPAND_THRESHOLD ? 'display:none' : '' %>" onclick="location.href='/<%= entity.key %>/<%= encodeURIComponent(r[entity.pk]) %>'">
+          <tr class="data-row <%= i % 2 === 0 ? 'row-even' : 'row-odd' %>" onclick="location.href='/<%= entity.key %>/<%= encodeURIComponent(r[entity.pk]) %>'">
             <% listFields.forEach(function(f, ci){ %>
               <td>
                 <% var val = r[f.name]; %>
@@ -103,6 +140,9 @@
                   <%= formatDate(val, true) %>
                 <% } else if (f.type === 'formula' || f.type === 'rollup') { %>
                   <%= formatFormulaValue(f, val) %>
+                <% } else if (f.type === 'picklist') { %>
+                  <% var pLabel = val ? picklistLabel(entity, f, val) : ''; %>
+                  <% if (ci === 0) { %><a class="cell-link" href="/<%= entity.key %>/<%= encodeURIComponent(r[entity.pk]) %>"><%= pLabel %></a><% } else { %><%= pLabel %><% } %>
                 <% } else if (ci === 0) { %>
                   <a class="cell-link" href="/<%= entity.key %>/<%= encodeURIComponent(r[entity.pk]) %>"><%= val %></a>
                 <% } else { %>
@@ -120,10 +160,35 @@
           </tr>
         <% }); %>
       </tbody>
+      <% if (rows.length > 0 && Object.keys(listTotals).some(function(k){ return listTotals[k].value !== null; })) { %>
+      <tfoot>
+        <tr class="row-total">
+          <% listFields.forEach(function(f, ci){ %>
+            <td>
+              <% if (ci === 0) { %><strong>Totals</strong><% } %>
+              <% var t = listTotals[f.name]; %>
+              <% if (t && t.value !== null) { %>
+                <% var fnLabel = { sum: 'Sum', avg: 'Avg', max: 'Max', min: 'Min' }[t.fn]; %>
+                <strong>
+                  <%= fnLabel %>:
+                  <% if (f.type === 'currency') { %><%= formatINR(t.value) %>
+                  <% } else if (f.type === 'percent') { %><%= formatPercent(t.value) %>
+                  <% } else { %><%= (Math.round(t.value * 100) / 100) %>
+                  <% } %>
+                </strong>
+              <% } %>
+            </td>
+          <% }); %>
+          <td class="col-actions">&nbsp;</td>
+        </tr>
+      </tfoot>
+      <% } %>
     </table>
-    <% if (rows.length > EXPAND_THRESHOLD) { %>
-      <div class="expand-row-wrap">
-        <button class="btn btn-mini expand-toggle" type="button" data-target="mainListTable" data-more-label="Show all <%= rows.length %> records (<%= rows.length - EXPAND_THRESHOLD %> more)" data-less-label="Show fewer" onclick="mlToggleExpand(this)">Show all <%= rows.length %> records (<%= rows.length - EXPAND_THRESHOLD %> more)</button>
+    <% if (totalPages > 1) { %>
+      <div class="expand-row-wrap" style="display:flex; gap:8px; align-items:center; justify-content:center;">
+        <% if (page > 1) { %><a class="btn btn-mini" href="<%= mlListUrl({ page: page - 1 }) %>">&larr; Previous</a><% } %>
+        <span class="admin-hint">Page <%= page %> of <%= totalPages %> (<%= totalCount %> total)</span>
+        <% if (page < totalPages) { %><a class="btn btn-mini" href="<%= mlListUrl({ page: page + 1 }) %>">Next &rarr;</a><% } %>
       </div>
     <% } %>
   </div>

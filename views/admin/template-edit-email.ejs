@@ -1,0 +1,35 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'templates' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Email Template &mdash; <%= template.label %></span>
+    <div class="applet-toolbar"><a class="btn btn-toolbar btn-mini" href="/admin/templates">&larr; Back to Template Library</a></div>
+  </div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <p class="admin-help">
+    This email is bound to <strong><%= baseEntity ? baseEntity.label : template.baseTable %></strong> &mdash; every
+    record of that table shows a <em>&#9993; <%= template.label %></em> button. Recipient, subject and body all use
+    the same <code>{{merge tags}}</code> as PDF templates: <code>{{Field}}</code> for a field on the record,
+    <code>{{Related.Chain.Field}}</code> across fk links (e.g. the tenant's email via a fk). The sender can edit
+    everything in a preview before it goes out.
+  </p>
+
+  <form class="detail-form" method="POST" action="/admin/templates/<%= template.key %>" style="max-width:720px;">
+    <div class="field-grid">
+      <div class="field-row"><label class="field-label">Template Name *</label><div class="field-value"><input type="text" name="label" value="<%= template.label %>" required></div></div>
+      <div class="field-row"><label class="field-label">To *</label><div class="field-value"><input type="text" name="emailTo" value="<%= template.emailTo || '' %>" required placeholder="{{SomeEmailField}} or a fk chain or a literal address"></div></div>
+      <div class="field-row"><label class="field-label">Cc</label><div class="field-value"><input type="text" name="emailCc" value="<%= template.emailCc || '' %>" placeholder="optional"></div></div>
+      <div class="field-row"><label class="field-label">Bcc</label><div class="field-value"><input type="text" name="emailBcc" value="<%= template.emailBcc || '' %>" placeholder="optional"></div></div>
+      <div class="field-row"><label class="field-label">Subject *</label><div class="field-value"><input type="text" name="emailSubject" value="<%= template.emailSubject || '' %>" required placeholder="e.g. Invoice {{BILLS_Number}} for {{BILLS_Client}}"></div></div>
+      <div class="field-row"><label class="field-label">Body (HTML)</label><div class="field-value"><textarea name="htmlBody" rows="16" style="width:100%;font-family:monospace;"><%= template.htmlBody || '' %></textarea></div></div>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save Email Template</button></div>
+  </form>
+</div>
+
+<%- include('../partials/foot') %>

@@ -1,0 +1,39 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'bulk-generate' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar"><span class="applet-title">Edit Profile &mdash; <%= profile.label %></span></div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <form method="POST" action="/admin/bulk-generate/<%= profile.key %>/edit" class="admin-form" style="padding:12px 16px;">
+    <label>Profile Name * <input type="text" name="label" required value="<%= profile.label %>"></label>
+    <label>Source Table <input type="text" value="<%= profile.sourceTable %>" readonly disabled></label>
+    <label>Source Filter (formula) <input type="text" name="sourceFilter" value="<%= profile.sourceFilter || '' %>" placeholder='e.g. T_Active = true'></label>
+    <label>Source Sort Field <input type="text" name="sourceSort" value="<%= profile.sourceSort || '' %>" placeholder="e.g. T_BillSequence"></label>
+    <label>Target Table <input type="text" value="<%= profile.targetTable %>" readonly disabled></label>
+    <label>Month Field (on target) <input type="text" name="monthField" value="<%= profile.monthField || '' %>" placeholder="e.g. INV_Month"></label>
+    <label>Dedup Field (on target) <input type="text" name="dedupField" value="<%= profile.dedupField || '' %>" placeholder="e.g. INV_Tenant"></label>
+    <label>Dedup Source Field <input type="text" name="dedupSourceField" value="<%= profile.dedupSourceField || '' %>" placeholder="e.g. T_Client_Code"></label>
+
+    <div class="applet-titlebar applet-titlebar-child" style="margin-top:10px;"><span class="applet-title" style="font-size:12px;">Field Mappings (target &larr; source field or literal)</span></div>
+    <div id="mappingsBody">
+      <% (profile.fieldMappings || []).forEach(function(m){ %>
+        <div style="display:flex;gap:8px;margin:4px 0;">
+          <input type="text" name="map_target" value="<%= m.targetField %>" placeholder="target field" style="flex:1;">
+          <input type="text" name="map_value" value="<%= m.value %>" placeholder="source field or literal" style="flex:1;">
+          <button class="btn btn-mini btn-danger" type="button" onclick="this.parentElement.remove()">&times;</button>
+        </div>
+      <% }); %>
+      <% if (!profile.fieldMappings || !profile.fieldMappings.length) { %>
+        <div style="display:flex;gap:8px;margin:4px 0;"><input type="text" name="map_target" placeholder="target field" style="flex:1;"><input type="text" name="map_value" placeholder="source field or literal" style="flex:1;"><button class="btn btn-mini btn-danger" type="button" onclick="this.parentElement.remove()">&times;</button></div>
+      <% } %>
+    </div>
+    <button class="btn btn-mini" type="button" onclick="var d=document.createElement('div');d.style='display:flex;gap:8px;margin:4px 0;';d.innerHTML='<input type=text name=map_target placeholder=&quot;target field&quot; style=flex:1><input type=text name=map_value placeholder=&quot;source field or literal&quot; style=flex:1><button class=&quot;btn btn-mini btn-danger&quot; type=button onclick=this.parentElement.remove()>&times;</button>';document.getElementById('mappingsBody').appendChild(d);">+ Add Mapping</button>
+    <div style="margin-top:12px;"><button class="btn btn-primary" type="submit">Save Profile</button></div>
+  </form>
+</div>
+
+<%- include('../partials/foot') %>

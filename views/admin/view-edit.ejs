@@ -34,6 +34,12 @@
       own table) that should match whatever record is selected in that parent row.
     </p>
     <p class="admin-help">
+      <strong>Detail applets</strong> (applets of type Detail, in Admin &rarr; Applets) show the single record
+      selected in their Parent Row's list, as a read-only field list below it. When a Detail applet's table is
+      the same as its Parent Row's list, you can leave <strong>Link Field</strong> blank &mdash; it links to the
+      selected record automatically (by primary key).
+    </p>
+    <p class="admin-help">
       <strong>No drag-to-reorder here, deliberately</strong> &mdash; Parent Row references are by row number, so
       reordering could silently change what an existing Parent Row reference points at. If you delete a row,
       double-check any Parent Row numbers below it still point where you intend.

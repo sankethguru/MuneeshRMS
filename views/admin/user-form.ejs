@@ -26,9 +26,10 @@
 
     <div class="applet-titlebar applet-titlebar-child" style="margin-top:16px;"><span class="applet-title">Table Permissions</span></div>
     <div id="permMatrix" style="<%= (isEdit && user.isAdmin) ? 'opacity:0.4' : '' %>">
+      <% var emailEntities = new Set((schema.templates || []).filter(function(t){ return t.baseKind === 'email'; }).map(function(t){ return t.baseTable; })); %>
       <div class="list-table-wrap">
         <table class="list-table">
-          <thead><tr><th>Table</th><th class="center">Create</th><th class="center">Read</th><th class="center">Update</th><th class="center">Delete</th></tr></thead>
+          <thead><tr><th>Table</th><th class="center">Create</th><th class="center">Read</th><th class="center">Update</th><th class="center">Delete</th><th class="center">Email</th></tr></thead>
           <tbody>
             <% Object.values(schema.entities).forEach(function(e, i){ var p = perms[e.key] || {}; %>
             <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
@@ -37,11 +38,13 @@
               <td class="center"><input type="checkbox" name="perm_<%= e.key %>_read" <%= p.read ? 'checked' : '' %>></td>
               <td class="center"><input type="checkbox" name="perm_<%= e.key %>_update" <%= p.update ? 'checked' : '' %>></td>
               <td class="center"><input type="checkbox" name="perm_<%= e.key %>_delete" <%= p.delete ? 'checked' : '' %>></td>
+              <td class="center"><% if (emailEntities.has(e.key)) { %><input type="checkbox" name="perm_<%= e.key %>_email" <%= p.email ? 'checked' : '' %>><% } else { %><span class="admin-hint">&mdash;</span><% } %></td>
             </tr>
             <% }); %>
           </tbody>
         </table>
       </div>
+      <p class="admin-hint" style="margin-top:6px;">The <strong>Email</strong> column only appears for tables that have email templates (Admin &rarr; Templates). Granting it lets the user send those emails from a record; Read alone no longer permits sending.</p>
     </div>
 
     <div class="form-actions"><button class="btn btn-primary" type="submit"><%= isEdit ? 'Save User' : 'Create User' %></button></div>

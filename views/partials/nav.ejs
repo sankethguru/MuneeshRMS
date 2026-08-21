@@ -1,58 +1,93 @@
 <div class="masthead">
   <div class="masthead-brand">
+    <button class="sidebar-toggle" type="button" onclick="mlToggleSidebar()" aria-label="Toggle sidebar" title="Toggle sidebar">&#9776;</button>
     <span class="brand-mark">ML</span>
     <span class="brand-name">Muneesh Legacy</span>
   </div>
+  <% if (typeof currentUser !== 'undefined' && currentUser) { %>
+    <form class="masthead-search" method="GET" action="/search" style="flex:1; max-width:340px; margin:0 16px;">
+      <input type="text" name="q" placeholder="Search everything&hellip;" autocomplete="off" style="width:100%;">
+    </form>
+  <% } %>
   <div class="masthead-right">
     <% if (typeof currentUser !== 'undefined' && currentUser) { %>
       <span class="masthead-user"><%= currentUser.username %><%= currentUser.isAdmin ? ' (Admin)' : '' %></span>
       <a class="btn btn-mini" href="/account">My Account</a>
+      <% if (currentUser.isAdmin) { %><a class="btn btn-mini" href="/admin"><svg class="ml-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Admin</a><% } %>
       <form method="POST" action="/logout" style="display:inline"><button class="btn btn-mini" type="submit">Log Out</button></form>
     <% } %>
   </div>
 </div>
 
-<div class="screen-tabs">
-  <a class="screen-tab <%= (!activeKey) ? 'active' : '' %>" href="/">Home</a>
-  <% navOrder.forEach(function(key){ var e = entities[key]; if (!e) return; %>
-    <a class="screen-tab <%= (activeKey === key) ? 'active' : '' %>" href="/<%= key %>"><%= e.label %></a>
-  <% }); %>
-  <% if (typeof screens !== 'undefined' && screens) { screens.forEach(function(s){ %>
-    <a class="screen-tab <%= (activeKey === 'screen:' + s.key) ? 'active' : '' %>" href="/screens/<%= s.key %>"><%= s.label %></a>
-  <% }); } %>
-  <% if (typeof currentUser !== 'undefined' && currentUser) { %>
-    <a class="screen-tab <%= (activeKey === 'reports') ? 'active' : '' %>" href="/reports">Reports</a>
-  <% } %>
-  <% if (typeof currentUser !== 'undefined' && currentUser && currentUser.isAdmin) { %>
-    <a class="screen-tab admin-tab <%= (activeKey === 'admin') ? 'active' : '' %>" href="/admin">&#9881; Admin</a>
-  <% } %>
-</div>
+<div class="app-shell" id="mlAppShell">
+  <nav class="sidebar" id="mlSidebar">
+    <a class="side-link top-level <%= (!activeKey) ? 'active' : '' %>" href="/">
+      <%- renderIcon('home') %><span class="side-label">Home</span>
+    </a>
+    <% if (typeof sidebarGroups !== 'undefined' && sidebarGroups) { sidebarGroups.forEach(function(g){ %>
+      <div class="side-group <%= g.collapsedByDefault ? 'collapsed' : '' %>" data-group-key="<%= g.key %>">
+        <button class="side-group-label" type="button" onclick="mlToggleGroup('<%= g.key %>')">
+          <span><%= g.label %></span>
+          <span class="side-group-chevron">&#9662;</span>
+        </button>
+        <div class="side-group-items">
+          <% g.items.forEach(function(it){
+            var isActive = (activeKey === 'screen:' + it.path.replace('/screens/','')) ||
+              (activeKey === it.path.replace(/^\//,'')) ||
+              (it.path === '/bills' && activeKey === 'bills') ||
+              (it.path === '/reminders' && activeKey === 'reminders') ||
+              (it.path === '/reports' && activeKey === 'reports');
+          %>
+            <a class="side-link <%= isActive ? 'active' : '' %>" href="<%= it.path %>" title="<%= it.label %>">
+              <%- renderIcon(it.icon) %><span class="side-label"><%= it.label %></span>
+            </a>
+          <% }); %>
+        </div>
+      </div>
+    <% }); } %>
+  </nav>
 
-<div class="thread-bar">
-  <span class="thread-crumb"><a href="/">Screen Home</a></span>
-  <% if (activeKey === 'admin') { %>
-    <span class="thread-sep">&raquo;</span>
-    <span class="thread-crumb"><a href="/admin">Application Administration</a></span>
-  <% } else if (activeKey === 'reports') { %>
-    <span class="thread-sep">&raquo;</span>
-    <span class="thread-crumb"><a href="/reports">Reports</a></span>
-    <% if (typeof reportLabel !== 'undefined' && reportLabel) { %>
-      <span class="thread-sep">&raquo;</span>
-      <span class="thread-crumb thread-current"><%= reportLabel %></span>
-    <% } %>
-  <% } else if (typeof activeKey === 'string' && activeKey.indexOf('screen:') === 0 && typeof screen !== 'undefined' && screen) { %>
-    <span class="thread-sep">&raquo;</span>
-    <span class="thread-crumb thread-current"><%= screen.label %></span>
-  <% } else if (activeKey && entities[activeKey]) { %>
-    <span class="thread-sep">&raquo;</span>
-    <span class="thread-crumb"><a href="/<%= activeKey %>"><%= entities[activeKey].label %></a></span>
-    <% if (typeof recordLabel !== 'undefined' && recordLabel) { %>
-      <span class="thread-sep">&raquo;</span>
-      <span class="thread-crumb thread-current"><%= recordLabel %></span>
-    <% } %>
-  <% } %>
-</div>
+  <div class="app-main">
+    <div class="thread-bar">
+      <span class="thread-crumb"><a href="/">Screen Home</a></span>
+      <% if (activeKey === 'admin') { %>
+        <span class="thread-sep">&raquo;</span>
+        <span class="thread-crumb"><a href="/admin">Application Administration</a></span>
+      <% } else if (activeKey === 'reports') { %>
+        <span class="thread-sep">&raquo;</span>
+        <span class="thread-crumb"><a href="/reports">Reports</a></span>
+        <% if (typeof reportLabel !== 'undefined' && reportLabel) { %>
+          <span class="thread-sep">&raquo;</span>
+          <span class="thread-crumb thread-current"><%= reportLabel %></span>
+        <% } %>
+      <% } else if (typeof activeKey === 'string' && activeKey.indexOf('screen:') === 0 && typeof screen !== 'undefined' && screen) { %>
+        <span class="thread-sep">&raquo;</span>
+        <span class="thread-crumb thread-current"><%= screen.label %></span>
+      <% } else if (activeKey && entities[activeKey]) { %>
+        <span class="thread-sep">&raquo;</span>
+        <span class="thread-crumb"><a href="/<%= activeKey %>"><%= entities[activeKey].label %></a></span>
+        <% if (typeof recordLabel !== 'undefined' && recordLabel) { %>
+          <span class="thread-sep">&raquo;</span>
+          <span class="thread-crumb thread-current"><%= recordLabel %></span>
+        <% } %>
+      <% } %>
+    </div>
 
-<% if (typeof currentUser !== 'undefined' && currentUser && currentUser.mustChangePassword) { %>
-  <div class="admin-notice err password-reminder">You're using the default admin password &mdash; <a href="/account">change it now</a>.</div>
-<% } %>
+    <% if (typeof currentUser !== 'undefined' && currentUser && currentUser.mustChangePassword) { %>
+      <div class="admin-notice err password-reminder">You're using the default admin password &mdash; <a href="/account">change it now</a>.</div>
+    <% } %>
+
+    <% if (typeof currentUser !== 'undefined' && currentUser && currentUser.isAdmin && typeof taxNoticeAcknowledged !== 'undefined' && !taxNoticeAcknowledged
+          && typeof activeKey === 'string' && (activeKey === 'tax_worksheets' || activeKey.indexOf('tax_') === 0)) { %>
+      <div class="admin-notice">
+        <strong>Before using Tax:</strong> it only works with tables named exactly <code>landlords</code>,
+        <code>tenants</code>, and <code>invoices</code> &mdash; not renamed, not restructured. Which
+        <em>field</em> on those tables plays each role (rent, TDS, PAN, and so on) can be mapped later, any
+        time, under <a href="/admin/tax-settings">Admin &rarr; Tax Settings</a> &mdash; that part's flexible,
+        the table names themselves aren't.
+        <form method="POST" action="/tax/acknowledge-notice" style="display:inline; margin-left:8px;">
+          <input type="hidden" name="next" value="<%= typeof currentUrl !== 'undefined' ? currentUrl : '/tax_worksheets' %>">
+          <button class="btn btn-mini" type="submit">Got it, don't show this again</button>
+        </form>
+      </div>
+    <% } %>

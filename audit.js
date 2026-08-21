@@ -75,7 +75,15 @@ function log({ entityKey, recordId, action, username, before, after }) {
     recordId: String(recordId),
     action, // 'create' | 'update' | 'delete'
     user: username || 'unknown',
-    changes: action === 'update' ? diffRecords(before, after) : [],
+    // Record changes only diff on 'update' — showing every field as a
+    // "change" on create/delete would be noisy when the whole record is
+    // new or gone anyway. Schema changes (entityKey prefixed "schema:")
+    // are different: a field has few, meaningful properties, and knowing
+    // exactly what a deleted/newly-created field looked like (its type,
+    // formula, etc.) is exactly the detail that makes "why did this
+    // report just break" debuggable — so those always get a full diff,
+    // regardless of action.
+    changes: (action === 'update' || String(entityKey).startsWith('schema:')) ? diffRecords(before, after) : [],
   };
   fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + '\n');
 }

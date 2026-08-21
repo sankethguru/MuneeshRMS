@@ -1,0 +1,229 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'themes' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar"><span class="applet-title">Themes</span></div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <p class="admin-help">
+    Choose a visual theme. The theme is saved per-device in your browser &mdash; each user/device can pick
+    independently. Click <strong>Apply</strong> to switch immediately.
+  </p>
+
+  <div class="theme-picker">
+    <%
+      var themes = [
+        { key: 'siebel', label: 'Classic', desc: 'Siebel-inspired: dark chrome, gold accents, beveled buttons, serif display font.', bar: '#1c3554', accent: '#c6a24b', bg: '#eae6da' },
+        { key: 'salesforce', label: 'Lightning', desc: 'Salesforce Lightning: blue brand, flat buttons, white cards, system sans-serif.', bar: '#0176d3', accent: '#0176d3', bg: '#f4f6f9' },
+        { key: 'coral', label: 'Coral', desc: 'Modern SaaS: white chrome, warm coral-orange accent, rounded cards, Plus Jakarta Sans.', bar: '#ffffff', accent: '#ef6820', bg: '#f3f4f6' },
+      ];
+      themes.forEach(function(t){ %>
+        <div class="theme-card" data-theme-key="<%= t.key %>" onclick="mlThemePickerApply('<%= t.key %>')">
+          <div class="theme-mockup">
+            <svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+              <rect width="200" height="120" rx="4" fill="<%= t.bg %>" stroke="#ccc" stroke-width="0.5"/>
+              <rect width="200" height="20" rx="4" fill="<%= t.bar %>"/>
+              <rect x="4" y="4" width="12" height="12" rx="2" fill="<%= t.accent %>" opacity="0.9"/>
+              <rect x="4" y="26" width="36" height="88" rx="2" fill="<%= t.bar %>" opacity="0.15"/>
+              <rect x="46" y="28" width="148" height="36" rx="3" fill="#fff" stroke="#ddd" stroke-width="0.5"/>
+              <rect x="50" y="32" width="30" height="5" rx="1" fill="<%= t.accent %>" opacity="0.7"/>
+              <rect x="50" y="41" width="80" height="3" rx="1" fill="#bbb"/>
+              <rect x="50" y="48" width="60" height="3" rx="1" fill="#ccc"/>
+              <rect x="50" y="55" width="70" height="3" rx="1" fill="#ccc"/>
+              <rect x="46" y="70" width="148" height="42" rx="3" fill="#fff" stroke="#ddd" stroke-width="0.5"/>
+              <rect x="50" y="74" width="40" height="5" rx="1" fill="<%= t.accent %>" opacity="0.7"/>
+              <rect x="50" y="83" width="130" height="3" rx="1" fill="#ddd"/>
+              <rect x="50" y="90" width="130" height="3" rx="1" fill="#ddd"/>
+              <rect x="50" y="97" width="100" height="3" rx="1" fill="#ddd"/>
+            </svg>
+          </div>
+          <div class="theme-info">
+            <strong><%= t.label %></strong>
+            <span class="theme-active" style="display:none; color:#22c55e; font-size:11px;"> &#x2713; Active</span>
+            <p class="admin-hint" style="margin:4px 0 0;"><%= t.desc %></p>
+          </div>
+        </div>
+    <% }); %>
+  </div>
+
+  <!-- ---------- Custom theme ---------- -->
+  <div class="applet-titlebar applet-titlebar-child" style="margin-top:18px;"><span class="applet-title">Custom Theme</span></div>
+  <p class="admin-help">
+    Pick your own colours and fonts. Each colour below controls one specific, clearly-labelled part of the
+    app &mdash; the preview updates live as you adjust them, so you always see exactly where a colour lands
+    before applying it. Saved per-device, like the other themes.
+  </p>
+
+  <div style="padding:0 16px;">
+    <div id="ctRoleRows"></div>
+
+    <div class="ct-live-preview">
+      <svg viewBox="0 0 400 240" xmlns="http://www.w3.org/2000/svg" id="customThemeSvg" style="width:100%; display:block;">
+        <rect id="ctSvgPage" width="400" height="240" fill="#f4f5f7"/>
+        <rect id="ctSvgHeader" width="400" height="34" fill="#1f2430"/>
+        <rect x="10" y="10" width="20" height="14" rx="3" id="ctSvgAccent1" fill="#6d28d9"/>
+        <rect x="52" y="10" width="12" height="14" rx="2" id="ctSvgHeaderText1" fill="#ffffff" opacity="0.85"/>
+        <rect x="0" y="34" width="88" height="206" id="ctSvgSidebar" fill="#1f2430" opacity="0.92"/>
+        <rect x="14" y="52" width="60" height="10" rx="2" id="ctSvgSidebarActive" fill="#6d28d9" opacity="0.35"/>
+        <rect x="14" y="72" width="60" height="6" rx="2" fill="#ffffff" opacity="0.5"/>
+        <rect x="14" y="88" width="60" height="6" rx="2" fill="#ffffff" opacity="0.35"/>
+        <rect x="100" y="52" width="290" height="70" rx="6" id="ctSvgCard1" fill="#ffffff" stroke="#ccc" stroke-width="1"/>
+        <rect x="112" y="64" width="70" height="9" rx="2" id="ctSvgText1" fill="#1e2530"/>
+        <rect x="112" y="80" width="160" height="6" rx="2" id="ctSvgTextSoft1" fill="#4a5261" opacity="0.6"/>
+        <rect x="112" y="92" width="120" height="6" rx="2" id="ctSvgTextSoft2" fill="#4a5261" opacity="0.4"/>
+        <rect x="290" y="64" width="86" height="20" rx="4" id="ctSvgAccentBtn" fill="#6d28d9"/>
+        <rect x="100" y="132" width="290" height="90" rx="6" id="ctSvgCard2" fill="#ffffff" stroke="#ccc" stroke-width="1"/>
+        <rect x="100" y="132" width="290" height="20" fill="#f8f8f8" id="ctSvgTableHead"/>
+        <rect x="112" y="140" width="60" height="6" rx="2" id="ctSvgText2" fill="#4a5261"/>
+        <line x1="100" y1="164" x2="390" y2="164" id="ctSvgBorder1" stroke="#ccc" stroke-width="1"/>
+        <rect x="112" y="172" width="90" height="7" rx="2" id="ctSvgText3" fill="#1e2530"/>
+        <line x1="100" y1="196" x2="390" y2="196" id="ctSvgBorder2" stroke="#ccc" stroke-width="1"/>
+        <rect x="112" y="204" width="90" height="7" rx="2" id="ctSvgText4" fill="#1e2530"/>
+      </svg>
+    </div>
+
+    <div class="admin-form" style="margin-top:10px;">
+      <label>Display Font (headings) <input type="text" id="ctDisplayFont" value="<%= customTheme.displayFont || '' %>" placeholder="e.g. Poppins, Georgia"></label>
+      <label>Body Font (text) <input type="text" id="ctBodyFont" value="<%= customTheme.bodyFont || '' %>" placeholder="e.g. Inter, Arial"></label>
+      <label>Google Fonts URL (optional) <input type="text" id="ctFontUrl" value="<%= customTheme.fontUrl || '' %>" placeholder="https://fonts.googleapis.com/css2?family=..."></label>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="btn btn-primary" type="button" onclick="mlApplyCustomTheme()">Apply Custom Theme</button>
+    </div>
+  </div>
+
+  <div class="theme-card" id="customThemeCard" data-theme-key="custom" onclick="mlThemePickerApply('custom')" style="margin:16px 16px 0;<%= customTheme.accent ? '' : 'display:none;' %>">
+    <div class="theme-info">
+      <strong>Custom</strong>
+      <span class="theme-active" style="display:none; color:#22c55e; font-size:11px;"> &#x2713; Active</span>
+      <p class="admin-hint" style="margin:4px 0 0;">Your own colours and fonts &mdash; click to switch to it.</p>
+    </div>
+  </div>
+
+  <script>
+    // app.js (which defines mlColorPicker, mlApplyTheme, etc.) is loaded via
+    // a <script> tag at the very end of the page (foot.ejs) — AFTER this
+    // block in document order. Deferring to DOMContentLoaded guarantees
+    // those functions exist before anything here calls them.
+    document.addEventListener('DOMContentLoaded', function () {
+    // Six clearly distinct, REAL colour roles (each maps to CSS variables
+    // that are actually read somewhere — the old picker had a "Page
+    // Background" control wired to a variable nothing used, so it silently
+    // did nothing). Every role gets its own custom HSV picker (not the OS
+    // native <input type=color>, so it looks and behaves the same on every
+    // platform) and updates the live mockup above immediately on drag.
+    var CT_ROLES = [
+      { key: 'header', label: 'Header & Sidebar', desc: 'The top bar and side navigation panel.', def: '#1f2430', svgTargets: ['ctSvgHeader', 'ctSvgSidebar'] },
+      { key: 'accent', label: 'Accent Colour', desc: 'Buttons, links, and the active nav highlight.', def: '#6d28d9', svgTargets: ['ctSvgAccent1', 'ctSvgAccentBtn', 'ctSvgSidebarActive'] },
+      { key: 'pageBg', label: 'Page Background', desc: 'The canvas behind all the cards.', def: '#f4f5f7', svgTargets: ['ctSvgPage'] },
+      { key: 'cardBg', label: 'Card Background', desc: 'The white panel/card surfaces.', def: '#ffffff', svgTargets: ['ctSvgCard1', 'ctSvgCard2', 'ctSvgTableHead'] },
+      { key: 'text', label: 'Text Colour', desc: 'Body text and headings inside cards.', def: '#1e2530', svgTargets: ['ctSvgText1', 'ctSvgText2', 'ctSvgText3', 'ctSvgText4'] },
+      { key: 'border', label: 'Border Colour', desc: 'Card outlines and table dividers.', def: '#8b8877', svgTargets: ['ctSvgCard1', 'ctSvgCard2', 'ctSvgBorder1', 'ctSvgBorder2'], isStroke: true },
+    ];
+    var ctPickers = {};
+    var ctSaved = (function () { try { return JSON.parse(localStorage.getItem('ml-custom-theme') || 'null'); } catch (e) { return null; } })();
+
+    function ctUpdatePreview(key, hex) {
+      var role = CT_ROLES.filter(function (r) { return r.key === key; })[0];
+      if (!role) return;
+      role.svgTargets.forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        if (role.isStroke) el.setAttribute('stroke', hex); else el.setAttribute('fill', hex);
+      });
+    }
+
+    (function buildRoleRows() {
+      var container = document.getElementById('ctRoleRows');
+      CT_ROLES.forEach(function (role) {
+        var initial = (ctSaved && ctSaved[role.key]) || role.def;
+        var row = document.createElement('div');
+        row.className = 'ct-role-row';
+        row.innerHTML =
+          '<div class="ct-role-label">' + role.label + '</div>' +
+          '<div class="ml-cp">' +
+            '<div class="ml-cp-swatch-row">' +
+              '<div class="ml-cp-swatch" id="ctSwatch_' + role.key + '"></div>' +
+              '<input type="text" class="ml-cp-hex" id="ctHex_' + role.key + '">' +
+            '</div>' +
+            '<div class="ml-cp-panel" id="ctPanel_' + role.key + '">' +
+              '<div class="ml-cp-sv-wrap"><canvas></canvas><div class="ml-cp-sv-cursor"></div></div>' +
+              '<div class="ml-cp-hue-wrap"><canvas></canvas><div class="ml-cp-hue-cursor"></div></div>' +
+              '<div class="ml-cp-hexrow"><label>Hex</label><input type="text" class="ml-cp-hex-inner"></div>' +
+              '<button class="btn btn-mini ml-cp-close" type="button">Done</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="ct-role-desc">' + role.desc + '</div>';
+        container.appendChild(row);
+        ctUpdatePreview(role.key, initial);
+        var swatch = row.querySelector('#ctSwatch_' + role.key);
+        var hexOuter = row.querySelector('#ctHex_' + role.key);
+        var panel = row.querySelector('#ctPanel_' + role.key);
+        var hexInner = row.querySelector('.ml-cp-hex-inner');
+        // Two hex fields (compact outer + one inside the popover) stay in
+        // sync; whichever the user edits drives the picker.
+        ctPickers[role.key] = mlColorPicker(swatch, hexInner, panel, initial, function (hex) {
+          hexOuter.value = hex;
+          ctUpdatePreview(role.key, hex);
+        });
+        hexOuter.value = initial;
+        hexOuter.addEventListener('change', function () {
+          var v = hexOuter.value.trim();
+          if (!/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(v)) return;
+          if (v[0] !== '#') v = '#' + v;
+          ctPickers[role.key].setHex(v);
+          ctUpdatePreview(role.key, v);
+        });
+      });
+    })();
+
+    if (ctSaved) {
+      document.getElementById('ctDisplayFont').value = ctSaved.displayFont || '';
+      document.getElementById('ctBodyFont').value = ctSaved.bodyFont || '';
+      document.getElementById('ctFontUrl').value = ctSaved.fontUrl || '';
+      document.getElementById('customThemeCard').style.display = '';
+    }
+
+    // Mark whichever theme is actually active right now (only one), and
+    // do the same on every click — this was the v4.0.1 bug: previously
+    // each click only ever SHOWED its own marker and never hid the
+    // others, so cards accumulated "Active" as you clicked through them.
+    function mlThemePickerSync() {
+      var current = (typeof mlCurrentTheme === 'function') ? mlCurrentTheme() : 'siebel';
+      document.querySelectorAll('.theme-card').forEach(function (card) {
+        var marker = card.querySelector('.theme-active');
+        if (!marker) return;
+        marker.style.display = (card.getAttribute('data-theme-key') === current) ? 'inline' : 'none';
+      });
+    }
+    function mlThemePickerApply(key) {
+      if (typeof mlApplyTheme === 'function') mlApplyTheme(key);
+      mlThemePickerSync();
+    }
+    window.mlThemePickerApply = mlThemePickerApply; // referenced by onclick= attributes on the theme cards
+    function mlApplyCustomTheme() {
+      var theme = { displayFont: document.getElementById('ctDisplayFont').value.trim(), bodyFont: document.getElementById('ctBodyFont').value.trim(), fontUrl: document.getElementById('ctFontUrl').value.trim() };
+      CT_ROLES.forEach(function (role) { theme[role.key] = ctPickers[role.key].getHex(); });
+      try { localStorage.setItem('ml-custom-theme', JSON.stringify(theme)); } catch (e) {}
+      document.getElementById('customThemeCard').style.display = '';
+      if (typeof mlApplyCustomThemeVars === 'function') mlApplyCustomThemeVars(theme);
+      mlThemePickerApply('custom');
+    }
+    window.mlApplyCustomTheme = mlApplyCustomTheme; // referenced by the Apply button's onclick=
+    mlThemePickerSync();
+    }); // end DOMContentLoaded
+  </script>
+</div>
+
+<style>
+.theme-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; padding: 14px; }
+.theme-card { border: 1px solid var(--border-dark); border-radius: 8px; padding: 12px; cursor: pointer; transition: box-shadow .12s ease; background: var(--panel-bg); }
+.theme-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.theme-mockup svg { width: 100%; height: auto; border-radius: 4px; }
+.theme-info { margin-top: 8px; }
+</style>
+
+<%- include('../partials/foot') %>

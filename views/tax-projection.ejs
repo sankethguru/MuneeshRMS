@@ -1,0 +1,130 @@
+<%- include('partials/head') %>
+<% if (!print) { %><%- include('partials/nav') %><% } %>
+
+<% const inr = (n) => { const neg = n < 0; const v = Math.abs(Math.round(n)); const s = v.toLocaleString('en-IN'); return (neg ? '−₹' : '₹') + s; }; %>
+
+<div class="applet-shell tax-sheet tax-projection-sheet <%= print ? 'tax-print' : '' %>">
+  <div class="tax-projection-banner">
+    <strong>SIMULATION — not a real Tax Worksheet.</strong> Every figure below is a projection built from what you've
+    entered — actual invoices for months not yet billed will differ, sometimes a lot. Verify with your auditor
+    before paying anything based on this page.
+  </div>
+
+  <div class="applet-titlebar">
+    <span class="applet-title">Advance Tax Projection — <%= landlordName %> [group <%= r.group.root %>: <%= r.group.codes.join(', ') %>] — FY <%= r.fy %> — <%= r.regime %> Regime</span>
+    <% if (!print) { %>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/tax_projections/<%= projection.TJ_RowID %>">Edit Inputs</a>
+      <% if (availableTenantsCount > 0) { %>
+        <form method="POST" action="/tax-projections/<%= projection.TJ_RowID %>/populate" style="display:inline;">
+          <button class="btn btn-toolbar" type="submit">+ Populate from Active Tenants (<%= availableTenantsCount %>)</button>
+        </form>
+      <% } %>
+      <a class="btn btn-toolbar" href="/tax-projections/<%= projection.TJ_RowID %>/add-row">+ Add Row</a>
+      <a class="btn btn-toolbar" href="/tax-projections/<%= projection.TJ_RowID %>?print=1" target="_blank">Print View</a>
+      <a class="btn btn-toolbar" href="/tax_projections">All Projections</a>
+    </div>
+    <% } %>
+  </div>
+
+  <% if (r.problems.length) { %>
+    <div class="bills-status bills-status-error"><% r.problems.forEach(p => { %><div><%= p %></div><% }) %></div>
+  <% } %>
+
+  <table class="list-table tax-table">
+    <thead>
+      <tr class="tax-section"><td colspan="7">Projection Rows</td></tr>
+      <% if (r.rowDetails.length > 0) { %>
+        <tr><th>Prop Type</th><th>Tenant</th><th>Rental</th><th>TDS Deb.</th><th>TDS %</th><th>Months</th><th>Total Rent / TDS</th></tr>
+      <% } %>
+    </thead>
+    <tbody>
+      <% if (r.rowDetails.length === 0) { %>
+        <tr><td colspan="7" class="bills-empty">No rows yet — "Populate from Active Tenants" or "Add Row" above.</td></tr>
+      <% } %>
+      <% r.rowDetails.forEach(function (d) { %>
+        <tr class="<%= d.mismatch ? 'tax-projection-mismatch' : '' %>">
+          <td><%= d.row.TJR_PropType || '' %></td>
+          <td>
+            <a href="/tax_projection_rows/<%= d.row.TJR_RowID %>"><%= d.row.TJR_Label %></a>
+            <% if (d.mismatch) { %>
+              <div class="tax-projection-flag">Actual rate so far: <%= inr(d.actual.rent / d.actual.count) %>/month (from <%= d.actual.count %> invoice<%= d.actual.count === 1 ? '' : 's' %>) vs. this row's <%= inr(d.row.TJR_Rental) %>/month.</div>
+            <% } %>
+          </td>
+          <td><%= inr(d.row.TJR_Rental) %></td>
+          <td><%= d.row.TJR_TDSDebitor ? 'Y' : 'N' %></td>
+          <td><%= ((Number(d.row.TJR_TDSPercent)||0)*100).toFixed(2) %>%</td>
+          <td><%= d.row.TJR_Months %></td>
+          <td><%= inr(d.totalRent) %> / <%= inr(d.totalTds) %></td>
+        </tr>
+      <% }); %>
+      <% if (r.rowDetails.length > 0) { %>
+        <tr class="tax-grand">
+          <td colspan="6">Total projected rent / TDS</td>
+          <td><%= inr(r.calc.gav + r.calc.otherSourcesRent) %> / <%= inr(r.calc.rentTds) %></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+
+  <table class="list-table tax-table">
+    <tbody>
+      <tr class="tax-section"><td colspan="2">A. Income from House Property</td></tr>
+      <tr><td>Projected gross rent — House Property rows</td><td><%= inr(r.calc.gav) %></td></tr>
+      <tr><td>Less: municipal taxes (as entered)</td><td><%= inr(-r.calc.municipal) %></td></tr>
+      <tr class="tax-sub"><td>Net annual value</td><td><%= inr(r.calc.nav) %></td></tr>
+      <tr><td>Less: standard deduction @ 30% (s.24a)</td><td><%= inr(-r.calc.stdDeduction) %></td></tr>
+      <tr><td>Less: housing loan interest (as entered)</td><td><%= inr(-r.calc.loanInterest) %></td></tr>
+      <tr class="tax-sub"><td>Income from house property</td><td><%= inr(r.calc.houseProperty) %></td></tr>
+
+      <tr class="tax-section"><td colspan="2">B. Income from Other Sources</td></tr>
+      <% if (r.calc.otherSourcesRent > 0) { %><tr><td>Projected rent — Other Sources (Land) rows</td><td><%= inr(r.calc.otherSourcesRent) %></td></tr><% } %>
+      <tr><td>Other income (as entered)</td><td><%= inr(r.calc.otherIncome) %></td></tr>
+
+      <tr class="tax-section"><td colspan="2">C. Total Income</td></tr>
+      <tr><td>Gross total income</td><td><%= inr(r.calc.grossTotal) %></td></tr>
+      <tr><td>Less: deductions (as entered)</td><td><%= inr(-r.calc.deductions) %></td></tr>
+      <tr class="tax-sub"><td>Total income (rounded, s.288A)</td><td><%= inr(r.calc.totalIncome) %></td></tr>
+
+      <tr class="tax-section"><td colspan="2">D. Tax</td></tr>
+      <tr><td>Tax at slab rates (<%= r.regime %> regime)</td><td><%= inr(r.calc.baseTax) %></td></tr>
+      <% if (r.calc.rebate > 0) { %><tr><td>Less: rebate u/s 87A</td><td><%= inr(-r.calc.rebate) %></td></tr><% } %>
+      <% if (r.calc.surcharge > 0 || r.calc.marginalRelief > 0) { %>
+        <tr><td>Surcharge @ <%= (r.calc.surchargeRate*100).toFixed(0) %>%<%= r.calc.marginalRelief > 0 ? ' (after marginal relief of ' + inr(r.calc.marginalRelief) + ')' : '' %></td><td><%= inr(r.calc.surcharge) %></td></tr>
+      <% } %>
+      <tr><td>Health &amp; education cess</td><td><%= inr(r.calc.cess) %></td></tr>
+      <tr class="tax-sub"><td>Total projected tax liability</td><td><%= inr(r.calc.totalLiability) %></td></tr>
+      <tr><td>Less: projected TDS on rent</td><td><%= inr(-r.calc.rentTds) %></td></tr>
+      <tr><td>Less: other TDS credit (as entered)</td><td><%= inr(-r.calc.otherTds) %></td></tr>
+      <tr class="tax-grand"><td><%= r.calc.netPayable >= 0 ? 'Projected net tax payable' : 'Projected refund' %></td><td><%= inr(Math.abs(r.calc.netPayable)) %></td></tr>
+    </tbody>
+  </table>
+
+  <table class="list-table tax-table">
+    <thead>
+      <tr class="tax-section"><td colspan="4">E. Advance Tax Schedule (s.211) — Based on This Projection</td></tr>
+      <tr><th>Installment</th><th>Cumulative Due</th><th>Cumulative Paid (real)</th><th>Shortfall</th></tr>
+    </thead>
+    <tbody>
+      <% r.schedule.forEach(inst => { %>
+        <tr>
+          <td><%= inst.label %></td>
+          <td><%= inr(inst.cumulativeDue) %></td>
+          <td><%= inr(inst.cumulativePaid) %></td>
+          <td class="<%= inst.shortfall > 0 ? 'tax-short' : '' %>"><%= inst.shortfall > 0 ? inr(inst.shortfall) : '—' %></td>
+        </tr>
+      <% }) %>
+      <tr class="tax-grand"><td>Total paid to date: <%= inr(r.totalPaid) %></td><td colspan="3">Balance vs projected liability: <%= inr(r.balance) %></td></tr>
+    </tbody>
+  </table>
+
+  <div class="tax-disclaimer">
+    This is a projection, built from figures you've entered, not real invoiced income — the further into the FY
+    a row's assumption sits, the more room there is for it to be wrong. Slab/cess/rebate/surcharge rates come
+    from the same Tax Slabs and Tax Config tables the real worksheet uses.
+    <b>Verify with your auditor before paying anything based on this page.</b>
+    Generated <%= new Date().toISOString().slice(0,10) %> by Muneesh Legacy.
+  </div>
+</div>
+
+<% if (print) { %><script>window.print();</script></body></html><% } else { %><%- include('partials/foot') %><% } %>

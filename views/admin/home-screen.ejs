@@ -1,0 +1,110 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'home-screen' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Home Screen</span>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <p class="admin-help" style="padding:8px 12px;">
+    What shows on the Home page, in this order. Drag the &#9776; handle to reorder. Add the same widget type
+    more than once if that's ever useful (two Quick Actions widgets with a different table list each, say) —
+    nothing here limits a type to appearing only once.
+  </p>
+
+  <div class="reorderable-list" data-reorder-url="/admin/home-screen/reorder" style="padding:0 12px;">
+    <% widgets.forEach(function(w){ var wt = widgetTypes[w.type]; %>
+      <div data-item-id="<%= w.id %>" style="border:1px solid var(--border-dark); margin-bottom:10px; background:var(--white);">
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px; background:var(--panel-bg); border-bottom:1px solid var(--border-dark);">
+          <span class="drag-handle" style="cursor:grab; color:var(--ink-soft);" title="Drag to reorder">&#9776;</span>
+          <strong style="flex:1;"><%= wt ? wt.label : w.type %></strong>
+          <form method="POST" action="/admin/home-screen/<%= w.id %>/delete" onsubmit="return confirm('Remove this widget from the Home page?');">
+            <button class="btn btn-mini btn-danger" type="submit">Remove</button>
+          </form>
+        </div>
+
+        <% if (w.type === 'quick-actions') { %>
+          <form method="POST" action="/admin/home-screen/<%= w.id %>/config" style="padding:10px;">
+            <p class="admin-help" style="margin-top:0;">Which tables get a "+ New" shortcut button:</p>
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:4px 12px;">
+              <% actionCandidates.forEach(function(c){ %>
+                <label style="font-size:13px; display:flex; align-items:center; gap:5px;">
+                  <input type="checkbox" name="actions" value="<%= c.key %>" <%= (w.config.actions||[]).includes(c.key) ? 'checked' : '' %>>
+                  <%= c.label %>
+                </label>
+              <% }); %>
+            </div>
+            <button class="btn btn-mini" type="submit" style="margin-top:8px;">Save</button>
+          </form>
+        <% } else if (w.type === 'kpi-cards') { %>
+          <form method="POST" action="/admin/home-screen/<%= w.id %>/config" style="padding:10px;">
+            <p class="admin-help" style="margin-top:0;">Which KPI cards to show:</p>
+            <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:4px 12px;">
+              <% Object.keys(kpiMetrics).forEach(function(key){ %>
+                <label style="font-size:13px; display:flex; align-items:center; gap:5px;">
+                  <input type="checkbox" name="metrics" value="<%= key %>" <%= (w.config.metrics||[]).includes(key) ? 'checked' : '' %>>
+                  <%= kpiMetrics[key].label %>
+                </label>
+              <% }); %>
+            </div>
+            <button class="btn btn-mini" type="submit" style="margin-top:8px;">Save</button>
+          </form>
+        <% } else if (w.type === 'announcement') { %>
+          <form method="POST" action="/admin/home-screen/<%= w.id %>/config" style="padding:10px;">
+            <p class="admin-help" style="margin-top:0;">Plain text shown as-is on the Home page:</p>
+            <textarea name="text" rows="3" style="width:100%;" maxlength="2000"><%= w.config.text || '' %></textarea>
+            <button class="btn btn-mini" type="submit" style="margin-top:8px;">Save</button>
+          </form>
+        <% } else if (w.type === 'advance-tax-next-due' || w.type === 'cc-bills-due' || w.type === 'bills-due' || w.type === 'uncleared-cheques') { %>
+          <%
+            var wt = widgetTypes[w.type];
+            var srcTable = wt && wt.sourceTable;
+            var srcEntity = srcTable && entities[srcTable];
+            var srcFields = srcEntity ? srcEntity.fields.filter(function(f){ return !['spacer','section'].includes(f.type); }) : [];
+            var configuredCols = (w.config && w.config.columns && w.config.columns.length) ? w.config.columns : (srcEntity ? (srcEntity.listColumns || []) : []);
+          %>
+          <form method="POST" action="/admin/home-screen/<%= w.id %>/config" style="padding:10px;">
+            <p class="admin-help" style="margin-top:0;">Which columns from <strong><%= srcEntity ? srcEntity.label : srcTable %></strong> to show (tick at least one; defaults to the table's list columns):</p>
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:4px 12px;">
+              <% srcFields.forEach(function(f){ %>
+                <label><input type="checkbox" name="columns" value="<%= f.name %>" <%= configuredCols.indexOf(f.name) >= 0 ? 'checked' : '' %>> <%= f.label %></label>
+              <% }); %>
+            </div>
+            <button class="btn btn-mini" type="submit" style="margin-top:8px;">Save</button>
+          </form>
+        <% } else if (w.type === 'report-card') { %>
+          <form method="POST" action="/admin/home-screen/<%= w.id %>/config" style="padding:10px;">
+            <p class="admin-help" style="margin-top:0;">Which existing Report to show &mdash; its own totals row, or its top rows if it has none. Runs with no parameters entered, same as opening it fresh.</p>
+            <select name="reportKey">
+              <option value="">&mdash; pick a report &mdash;</option>
+              <% reportOptions.forEach(function(r){ %>
+                <option value="<%= r.key %>" <%= w.config.reportKey === r.key ? 'selected' : '' %>><%= r.label %></option>
+              <% }); %>
+            </select>
+            <button class="btn btn-mini" type="submit" style="margin-top:8px;">Save</button>
+          </form>
+        <% } %>
+      </div>
+    <% }); %>
+    <% if (widgets.length === 0) { %>
+      <p class="admin-help" style="font-style:italic;">Nothing on the Home page yet — add a widget below.</p>
+    <% } %>
+  </div>
+
+  <div style="padding:8px 12px;">
+    <form method="POST" action="/admin/home-screen/add" style="display:flex; align-items:center; gap:8px;">
+      <select name="type">
+        <% Object.keys(widgetTypes).forEach(function(key){ %>
+          <option value="<%= key %>"><%= widgetTypes[key].label %></option>
+        <% }); %>
+      </select>
+      <button class="btn btn-toolbar btn-mini" type="submit">+ Add Widget</button>
+    </form>
+  </div>
+</div>
+
+<%- include('../partials/foot') %>

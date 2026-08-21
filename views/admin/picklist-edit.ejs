@@ -15,7 +15,7 @@
 
   <% var sourceTableEntity = picklist && picklist.sourceType === 'table' ? entities[picklist.sourceTable] : null; %>
   <% var sourceFields = sourceTableEntity ? sourceTableEntity.fields.filter(function(f){ return f.type !== 'spacer' && f.type !== 'section'; }) : []; %>
-  <% var rows = (picklist && picklist.sourceType === 'static' ? picklist.values : []).concat([{},{},{}]); %>
+  <% /* Static values now render directly from picklist.values (below), with new rows added client-side via mlAddPicklistRow(). */ %>
 
   <form class="detail-form" method="POST" action="<%= picklist ? '/admin/picklists/' + picklist.key : '/admin/picklists' %>">
     <div class="field-grid">
@@ -54,20 +54,26 @@
       <div class="form-actions"><button class="btn btn-primary" type="submit">Create Picklist</button></div>
     <% } else if (picklist.sourceType === 'static') { %>
       <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Values</span></div>
-      <p class="admin-help">Uncheck Active to retire a value without deleting it &mdash; existing records that already used it keep showing it, but it won't be offered as a new choice.</p>
+      <p class="admin-help">Editing a value's text here is safe &mdash; existing records keep pointing at the same stable option even after you rename it. Uncheck Active to retire a value without deleting it &mdash; existing records that already used it keep showing it, but it won't be offered as a new choice.</p>
       <table class="list-table">
         <thead><tr><th>Value</th><th>Active</th><th></th></tr></thead>
         <tbody id="valuesBody">
-          <% rows.forEach(function(v){ %>
+          <% (picklist.values || []).forEach(function(v, idx){ %>
           <tr>
-            <td><input type="text" name="value[]" value="<%= v.value || '' %>" style="width:220px"></td>
-            <td><input type="checkbox" name="active[]" value="on" <%= v.active !== false ? 'checked' : '' %>></td>
-            <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)" title="Remove this row">&times;</button></td>
+            <td>
+              <input type="hidden" name="values[<%= idx %>][key]" value="<%= v.key %>">
+              <input type="text" name="values[<%= idx %>][label]" value="<%= v.label %>" style="width:220px">
+            </td>
+            <td>
+              <input type="hidden" name="values[<%= idx %>][active]" value="off">
+              <input type="checkbox" name="values[<%= idx %>][active]" value="on" <%= v.active !== false ? 'checked' : '' %>>
+            </td>
+            <td><button class="btn btn-mini btn-danger" type="button" onclick="this.closest('tr').remove()" title="Remove this row">&times;</button></td>
           </tr>
           <% }); %>
         </tbody>
       </table>
-      <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('valuesBody')">+ Add Row</button></p>
+      <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddPicklistRow()">+ Add Row</button></p>
       <div class="form-actions"><button class="btn btn-primary" type="submit">Save Picklist</button></div>
     <% } else { %>
       <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Table Source</span></div>
@@ -114,6 +120,28 @@
       var row = document.getElementById('newSourceTableRow');
       if (row) row.style.display = this.value === 'table' ? '' : 'none';
     });
+  }
+  // New rows get a fresh, non-colliding bracket index (existing rows use
+  // their position 0..N-1, so continuing the count upward never collides).
+  // A blank key (hidden input left empty) tells the server this is a
+  // brand-new option — it mints a stable key on save.
+  var mlPicklistRowCounter = document.querySelectorAll('#valuesBody tr').length;
+  function mlAddPicklistRow() {
+    var idx = mlPicklistRowCounter++;
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><input type="hidden" name="values[' + idx + '][key]" value="">' +
+      '<input type="text" name="values[' + idx + '][label]" style="width:220px" placeholder="new option"></td>' +
+      '<td><input type="hidden" name="values[' + idx + '][active]" value="off">' +
+      '<input type="checkbox" name="values[' + idx + '][active]" value="on" checked></td>' +
+      '<td><button class="btn btn-mini btn-danger" type="button" onclick="this.closest(\'tr\').remove()" title="Remove this row">&times;</button></td>';
+    document.getElementById('valuesBody').appendChild(tr);
+  }
+  // A brand-new static picklist starts with zero values — pre-seed a
+  // few blank rows so there's something to type into immediately,
+  // matching the old comma-box's "just start typing" convenience.
+  if (mlPicklistRowCounter === 0 && document.getElementById('valuesBody')) {
+    for (var __i = 0; __i < 3; __i++) mlAddPicklistRow();
   }
 </script>
 

@@ -9,13 +9,25 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const archiver = require('archiver');
+const scheduledBackup = require('../scheduledBackup');
+const templateStarters = require('../templateStarters');
 const AdmZip = require('adm-zip');
 const schemaLib = require('../schema');
+const mailer = require('../mailer');
+const emailMod = require('../email');
 const { atomicWriteFileSync } = require('../fsutil');
 const db = require('../db');
 const usersLib = require('../users');
 const audit = require('../audit');
+const billsLib = require('../bills');
+const remindersLib = require('../reminders');
+const taxLib = require('../tax');
+const icons = require('../icons');
+const homeMod = require('../home');
 const errorlog = require('../errorlog');
+const notify = require('../notify');
+const telegram = require('../telegram');
+const secrets = require('../secrets');
 const csv = require('../csv');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -55,6 +67,7 @@ router.use((req, res, next) => {
   res.locals.activeKey = 'admin';
   res.locals.adminSubnavOrder = req.schema.adminSubnavOrder;
   res.locals.adminSubnavFixedPages = schemaLib.ADMIN_SUBNAV_FIXED_PAGES;
+  res.locals.isAdminPage = true;
   next();
 });
 
@@ -69,7 +82,17 @@ router.use((req, res, next) => {
 // state is preserved to a timestamped .bak so a bad restore is recoverable).
 
 router.get('/backup', (req, res) => {
-  res.render('admin/backup', { error: req.query.error, notice: req.query.notice });
+  res.render('admin/backup', { error: req.query.error, notice: req.query.notice, scheduledBackups: scheduledBackup.listBackups() });
+});
+
+router.get('/backup/scheduled/:filename', (req, res) => {
+  // Guard against path traversal — only a bare filename, no directory
+  // components, and it has to actually be one of the real, currently
+  // listed scheduled backups, not an arbitrary path constructed by hand.
+  const filename = path.basename(req.params.filename);
+  const known = scheduledBackup.listBackups().some(b => b.filename === filename);
+  if (!known) return res.status(404).send('Unknown backup file.');
+  res.download(path.join(scheduledBackup.BACKUPS_DIR, filename), filename);
 });
 
 // ---- errors: recent server crashes ---------------------------------------
@@ -119,26 +142,513 @@ router.post('/payqr-settings', (req, res) => {
   }
 });
 
-// ---- Formula language help --------------------------------------------
-// Pure static documentation, no data dependency — just explains the
-// syntax available inside formula/rollup/report expressions.
+// ---- Email Settings (SMTP transport + notify-channel toggle) --------------
+// Email settings were merged into the Notifications page (below Telegram).
+// Keep this path working for old links/bookmarks by redirecting there.
+router.get('/email-settings', (req, res) => res.redirect('/admin/notifications'));
 
-router.get('/help', (req, res) => {
-  res.render('admin/help', {});
+router.post('/email-settings', (req, res) => {
+  const schema = req.schema;
+  try {
+    schema.emailSettings = {
+      host: String(req.body.host || '').trim(),
+      port: Number(req.body.port) || 587,
+      secure: req.body.secure === 'on' || req.body.secure === 'true',
+      username: String(req.body.username || '').trim(),
+      fromName: String(req.body.fromName || '').trim(),
+      fromAddress: String(req.body.fromAddress || '').trim(),
+      replyTo: String(req.body.replyTo || '').trim(),
+      notifyChannel: req.body.notifyChannel === 'on' || req.body.notifyChannel === 'true',
+      notifyEmailTo: String(req.body.notifyEmailTo || '').trim(),
+      logRetentionDays: Number(req.body.logRetentionDays) > 0 ? Number(req.body.logRetentionDays) : 90,
+    };
+    // Password only via secrets (never schema/backups). Blank = leave as-is;
+    // an explicit "clear" checkbox wipes it. Env-var passwords aren't editable.
+    if (secrets.smtpPasswordSource() !== 'env') {
+      if (req.body.clearPassword === 'on') secrets.setSmtpPassword('');
+      else if (String(req.body.password || '').length) secrets.setSmtpPassword(req.body.password);
+    }
+    schemaLib.persist(schema);
+    res.redirect('/admin/notifications?notice=' + encodeURIComponent('Email settings saved.'));
+  } catch (err) {
+    res.redirect('/admin/notifications?error=' + encodeURIComponent(err.message));
+  }
 });
 
-// ---- Getting Started / Journey ------------------------------------------
-// A narrative, story-style walkthrough of actually using the app end to
-// end — as opposed to /help above, which is a function-by-function
-// formula reference. This is the thing meant to let a brand-new user run
-// the whole app without the person who built it ever having to explain
-// anything in person. STANDING INSTRUCTION: revisit and update this
-// whenever a meaningfully new feature ships, the same way README.md gets
-// kept current for developers — this is that same habit, aimed at an
-// actual end user instead.
+router.post('/email-settings/test', async (req, res) => {
+  const schema = req.schema;
+  const to = String(req.body.testTo || '').trim();
+  if (!to) return res.redirect('/admin/notifications?error=' + encodeURIComponent('Enter an address to send the test to.'));
+  const r = await mailer.sendTest(schema.emailSettings || {}, to);
+  emailMod.logEmail({ to, subject: 'Muneesh Legacy — test email', kind: 'test', status: r.ok ? 'sent' : 'failed', detail: r.ok ? (r.response || 'sent') : (r.error && r.error.message), by: req.user && req.user.username });
+  if (r.ok) res.redirect('/admin/notifications?notice=' + encodeURIComponent('Test email sent to ' + to + '.'));
+  else res.redirect('/admin/notifications?error=' + encodeURIComponent('Test failed: ' + ((r.error && r.error.message) || 'unknown error')));
+});
 
-router.get('/journey', (req, res) => {
-  res.render('admin/journey', {});
+// ---- Tax field-role settings -----------------------------------------
+// Same shape as PayQR settings above: which field on Landlords/Tenants/
+// Invoices plays each role tax.js's computation needs. See tax.js and
+// schema.js (TAX_FIELD_ROLES) for the full rationale.
+
+router.get('/tax-settings', (req, res) => {
+  const schema = req.schema;
+  const requiredTables = ['landlords', 'tenants', 'invoices'];
+  const missingTables = requiredTables.filter(k => !schema.entities[k]);
+  const settings = schema.taxSettings || {};
+  const roleFields = {};
+  Object.keys(schemaLib.TAX_FIELD_ROLES).forEach(key => {
+    const role = schemaLib.TAX_FIELD_ROLES[key];
+    const entity = schema.entities[role.entity];
+    roleFields[key] = { ...role, options: schemaLib.taxEligibleFields(entity, key) };
+  });
+  res.render('admin/tax-settings', {
+    missingTables, settings, roleFields,
+    error: req.query.error, notice: req.query.notice,
+  });
+});
+
+router.post('/tax-settings', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.updateTaxSettings(schema, req.body);
+    schemaLib.persist(schema);
+    res.redirect('/admin/tax-settings?notice=' + encodeURIComponent('Tax settings saved.'));
+  } catch (err) {
+    res.redirect('/admin/tax-settings?error=' + encodeURIComponent(err.message));
+  }
+});
+
+// ---- Help (Getting Started + Formula Language Reference) ----------------
+// One consolidated page, two views selected by ?view= (getting-started is
+// the default) — Getting Started is the narrative walkthrough of actually
+// using the app end to end, Formula Language Reference is the
+// function-by-function technical reference for formulas/rollups/reports
+// plus the separate {{tag}} syntax used in Template Library documents.
+// Previously two entirely separate pages (/help and /journey); merged per
+// direct request — no redirect kept for the old /journey URL, a clean
+// break was explicitly preferred over compatibility since this is still
+// pre-production. STANDING INSTRUCTION (carried forward from both
+// previous routes, not new): keep this current whenever a meaningfully
+// new feature ships or an existing one's behavior changes — both views
+// usually need updating together, since a new feature is often both a
+// new step in the walkthrough AND a new function/syntax entry in the
+// reference.
+
+// ---- Admin -> Sidebar: customizing the left nav's groups/items/icons -----
+// See schema.js's sidebarGroupsFor/addSidebarGroup/etc. for the actual data
+// model and validation; these routes are thin wrappers, matching every
+// other Admin CRUD screen's own shape (load schema, mutate, persist,
+// redirect with a notice/error).
+
+// Everything NOT currently placed in any group — real tables (navOrder),
+// custom Screens, and the built-in mini-app routes — is what the "Add
+// item" picker on each group offers. A table/screen/mini-app already
+// placed in one group doesn't show up as addable again elsewhere; the
+// same table CAN still be added to a second group deliberately (e.g.
+// wanting Invoices reachable from two different groupings), so this only
+// excludes items that are placed nowhere yet, not exact duplicates.
+function unplacedSidebarCandidates(schema) {
+  const placedPaths = new Set();
+  schema.sidebarGroups.forEach(g => g.items.forEach(it => placedPaths.add(it.path)));
+  const candidates = [];
+  schema.navOrder.forEach(key => {
+    const e = schema.entities[key];
+    if (e && !placedPaths.has(`/${key}`)) candidates.push({ path: `/${key}`, label: e.label, icon: schemaLib.guessIconForKey(key), entityKeys: [key] });
+  });
+  schemaLib.screensFor(schema).forEach(s => {
+    const p = `/screens/${s.key}`;
+    if (!placedPaths.has(p)) candidates.push({ path: p, label: s.label, icon: 'layout', entityKeys: [] });
+  });
+  schemaLib.builtinSidebarLinks(schema).forEach(link => {
+    if (!placedPaths.has(link.path)) candidates.push(link);
+  });
+  return candidates;
+}
+
+router.get('/sidebar', (req, res) => {
+  const schema = req.schema;
+  res.render('admin/sidebar', {
+    groups: schema.sidebarGroups,
+    candidates: unplacedSidebarCandidates(schema),
+    iconKeys: icons.iconKeys(),
+    renderIcon: icons.renderIcon,
+    error: req.query.error, notice: req.query.notice,
+  });
+});
+
+router.post('/sidebar/groups', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.addSidebarGroup(schema, { label: req.body.label, collapsedByDefault: req.body.collapsedByDefault === 'on' });
+    schemaLib.persist(schema);
+    res.redirect('/admin/sidebar?notice=' + encodeURIComponent('Group added.'));
+  } catch (err) {
+    res.redirect('/admin/sidebar?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/sidebar/groups/reorder', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.reorderSidebarGroups(schema, req.body.order || []);
+    schemaLib.persist(schema);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/sidebar/groups/:key', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.updateSidebarGroup(schema, req.params.key, { label: req.body.label, collapsedByDefault: req.body.collapsedByDefault === 'on' });
+    schemaLib.persist(schema);
+    res.redirect('/admin/sidebar?notice=' + encodeURIComponent('Group updated.'));
+  } catch (err) {
+    res.redirect('/admin/sidebar?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/sidebar/groups/:key/delete', (req, res) => {
+  const schema = req.schema;
+  schemaLib.deleteSidebarGroup(schema, req.params.key);
+  schemaLib.persist(schema);
+  res.redirect('/admin/sidebar?notice=' + encodeURIComponent('Group removed — its items are no longer in the sidebar (not deleted as tables, just unlisted here).'));
+});
+
+router.post('/sidebar/groups/:key/items', (req, res) => {
+  const schema = req.schema;
+  try {
+    // The "Add item" picker submits path/label/icon/entityKeys together
+    // (entityKeys as a JSON string, since a plain form field can't carry
+    // an array) — reparsed here rather than trusting the client further
+    // than that.
+    let entityKeys = [];
+    try { entityKeys = JSON.parse(req.body.entityKeys || '[]'); } catch (e) { entityKeys = []; }
+    schemaLib.addSidebarItem(schema, req.params.key, { path: req.body.path, label: req.body.label, icon: req.body.icon, entityKeys });
+    schemaLib.persist(schema);
+    res.redirect('/admin/sidebar?notice=' + encodeURIComponent('Item added.'));
+  } catch (err) {
+    res.redirect('/admin/sidebar?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/sidebar/groups/:key/items/:idx', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.updateSidebarItem(schema, req.params.key, Number(req.params.idx), { label: req.body.label, icon: req.body.icon });
+    schemaLib.persist(schema);
+    res.redirect('/admin/sidebar?notice=' + encodeURIComponent('Item updated.'));
+  } catch (err) {
+    res.redirect('/admin/sidebar?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/sidebar/groups/:key/items/:idx/delete', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.deleteSidebarItem(schema, req.params.key, Number(req.params.idx));
+    schemaLib.persist(schema);
+    res.redirect('/admin/sidebar?notice=' + encodeURIComponent('Item removed.'));
+  } catch (err) {
+    res.redirect('/admin/sidebar?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/sidebar/groups/:key/items/reorder', (req, res) => {
+  const schema = req.schema;
+  try {
+    const indexes = (req.body.order || []).map(Number);
+    schemaLib.reorderSidebarItems(schema, req.params.key, indexes);
+    schemaLib.persist(schema);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- Home Screen widgets ------------------------------------------------
+// Same overall shape as the Sidebar routes above — a flat, ordered list
+// rather than nested groups, since widgets aren't grouped. See home.js for
+// the widget registry and how each widget's own data actually gets pulled.
+
+router.get('/home-screen', (req, res) => {
+  const schema = req.schema;
+  const kpiEntityLabel = (k) => (schema.entities[k] ? schema.entities[k].label : k);
+  res.render('admin/home-screen', {
+    widgets: schema.homeWidgets,
+    widgetTypes: homeMod.WIDGET_TYPES,
+    kpiMetrics: homeMod.KPI_METRICS,
+    actionCandidates: schema.navOrder.filter(k => schema.entities[k]).map(k => ({ key: k, label: schema.entities[k].label })),
+    reportOptions: schemaLib.reportDefsFor(schema).map(r => ({ key: r.key, label: r.label })),
+    kpiEntityLabel,
+    error: req.query.error, notice: req.query.notice,
+  });
+});
+
+router.post('/home-screen/add', (req, res) => {
+  const schema = req.schema;
+  try {
+    homeMod.addHomeWidget(schema, req.body.type);
+    schemaLib.persist(schema);
+    res.redirect('/admin/home-screen?notice=' + encodeURIComponent('Widget added.'));
+  } catch (err) {
+    res.redirect('/admin/home-screen?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/home-screen/reorder', (req, res) => {
+  const schema = req.schema;
+  try {
+    homeMod.reorderHomeWidgets(schema, req.body.order || []);
+    schemaLib.persist(schema);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/home-screen/:id/delete', (req, res) => {
+  const schema = req.schema;
+  homeMod.deleteHomeWidget(schema, req.params.id);
+  schemaLib.persist(schema);
+  res.redirect('/admin/home-screen?notice=' + encodeURIComponent('Widget removed.'));
+});
+
+router.post('/home-screen/:id/config', (req, res) => {
+  const schema = req.schema;
+  try {
+    // Checkbox-list fields (actions, metrics) arrive as a single string
+    // when only one is checked, an array otherwise; normalized to always
+    // be an array before handing off. text/reportKey are plain single
+    // values, passed through as-is.
+    const raw = req.body.actions || req.body.metrics;
+    const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+    homeMod.updateHomeWidgetConfig(schema, req.params.id, {
+      actions: list, metrics: list,
+      text: req.body.text, reportKey: req.body.reportKey,
+      columns: req.body.columns,
+    });
+    schemaLib.persist(schema);
+    res.redirect('/admin/home-screen?notice=' + encodeURIComponent('Widget updated.'));
+  } catch (err) {
+    res.redirect('/admin/home-screen?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.get('/help', (req, res) => {
+  res.render('admin/help', { view: req.query.view === 'formula-reference' ? 'formula-reference' : 'getting-started' });
+});
+
+// ---- Notifications (Telegram) ---------------------------------------------
+// Config lives in schema.notificationSettings (chat IDs are not secrets —
+// nothing can be sent without the bot token). The TOKEN itself lives in
+// secrets.js, outside schema.json, so it never enters a backup archive.
+
+function notificationsPageModel(req) {
+  const schema = req.schema;
+  notify.ensureNotificationSettings(schema);
+  const settings = schema.notificationSettings;
+  const now = new Date();
+
+  // "Status right now" per source, computed against an admin-level view
+  // so the page reports what EXISTS, not what one recipient can see.
+  const sourceStatus = {};
+  Object.keys(notify.SOURCES).forEach(key => {
+    let r;
+    try { r = notify.SOURCES[key].collect(schema, req.currentUser); }
+    catch (e) { r = { available: false, reason: e && e.message }; }
+    sourceStatus[key] = { available: !!r.available, reason: r.reason, count: (r.items || []).length };
+  });
+
+  return {
+    settings,
+    sources: notify.SOURCES,
+    modes: notify.MODES,
+    modeLabels: { off: 'Off', digest: 'Daily digest', immediate: 'Immediate', both: 'Both' },
+    sourceStatus,
+    users: usersLib.getAll().map(u => ({ username: u.username, isAdmin: !!u.isAdmin })),
+    hasToken: secrets.hasTelegramToken(),
+    maskedToken: secrets.maskedTelegramToken(),
+    tokenSource: secrets.telegramTokenSource(),
+    digestInQuiet: notify.isQuietHour(Number(settings.digestHour), settings.quietStartHour, settings.quietEndHour),
+    tickMinutes: Math.round(notify.TICK_INTERVAL_MS / 60000),
+    preview: notify.previewForAdmin(schema, settings, now),
+    // Email delivery section (merged from the old Email Settings page).
+    emailSettings: schema.emailSettings || {},
+    emailPasswordSource: secrets.smtpPasswordSource(),
+    emailHasPassword: secrets.hasSmtpPassword(),
+    emailConfigured: mailer.isConfigured(schema.emailSettings),
+    emailTemplates: (schema.templates || []).filter(t => t.baseKind === 'email'),
+    error: req.query.error, notice: req.query.notice,
+  };
+}
+
+router.get('/notifications', (req, res) => {
+  res.render('admin/notifications', notificationsPageModel(req));
+});
+
+router.post('/notifications/token', (req, res) => {
+  if (secrets.telegramTokenSource() === 'env') {
+    return res.redirect('/admin/notifications?error=' + encodeURIComponent('The token comes from the TELEGRAM_BOT_TOKEN environment variable and cannot be changed here.'));
+  }
+  try {
+    if (req.body.clear) {
+      secrets.setTelegramToken('');
+      return res.redirect('/admin/notifications?notice=' + encodeURIComponent('Bot token removed.'));
+    }
+    const token = String(req.body.token || '').trim();
+    // Blank submit means "leave the stored token alone" — the field is a
+    // password input that never echoes the current value, so an empty
+    // post is far more likely to be "I didn't touch it" than "erase it".
+    // Erasing is an explicit button.
+    if (!token) return res.redirect('/admin/notifications?notice=' + encodeURIComponent('Token unchanged.'));
+    if (!/^\d+:[A-Za-z0-9_-]{20,}$/.test(token)) {
+      return res.redirect('/admin/notifications?error=' + encodeURIComponent('That does not look like a Telegram bot token (expected "123456789:AA..."). Nothing was saved.'));
+    }
+    secrets.setTelegramToken(token);
+    res.redirect('/admin/notifications?notice=' + encodeURIComponent('Bot token saved. Use "Check connection" to confirm it works.'));
+  } catch (err) {
+    res.redirect('/admin/notifications?error=' + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/notifications/check', async (req, res) => {
+  const r = await telegram.getMe(secrets.getTelegramToken());
+  if (!r.ok) return res.redirect('/admin/notifications?error=' + encodeURIComponent(r.error.message));
+  const me = r.result || {};
+  res.redirect('/admin/notifications?notice=' + encodeURIComponent(`Connected as @${me.username || me.first_name || 'bot'}.`));
+});
+
+router.post('/notifications/test', async (req, res) => {
+  const chatId = String(req.body.chatId || '').trim();
+  if (!chatId) return res.redirect('/admin/notifications?error=' + encodeURIComponent('No chat ID given.'));
+  const r = await notify.sendTest(chatId);
+  if (!r.ok) return res.redirect('/admin/notifications?error=' + encodeURIComponent(`Test to ${chatId} failed: ${r.error.message}`));
+  res.redirect('/admin/notifications?notice=' + encodeURIComponent(`Test message sent to ${chatId}.`));
+});
+
+router.post('/notifications/settings', (req, res) => {
+  const schema = req.schema;
+  notify.ensureNotificationSettings(schema);
+  const s = schema.notificationSettings;
+  const hour = (v, fallback) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= 23 ? n : fallback;
+  };
+  s.enabled = !!req.body.enabled;
+  s.digestHour = hour(req.body.digestHour, s.digestHour);
+  s.quietStartHour = hour(req.body.quietStartHour, s.quietStartHour);
+  s.quietEndHour = hour(req.body.quietEndHour, s.quietEndHour);
+  const days = Number(req.body.retentionDays);
+  if (Number.isFinite(days) && days >= 1 && days <= 3650) s.retentionDays = Math.round(days);
+  Object.keys(notify.SOURCES).forEach(key => {
+    const mode = req.body[`mode__${key}`];
+    if (notify.MODES.includes(mode)) s.sources[key] = { ...(s.sources[key] || {}), mode };
+  });
+  schemaLib.persist(schema);
+  res.redirect('/admin/notifications?notice=' + encodeURIComponent('Notification settings saved.'));
+});
+
+// Saves the same form the regular "Save settings" button does (so what
+// gets tested is exactly what's now actually configured, not some
+// unsaved in-between state), then sends the current admin's own preview
+// as a real Telegram message to their own configured chat — "this is
+// genuinely what your selections produce," not just the on-screen text
+// preview in section 5, which doesn't show how Telegram itself renders
+// the formatting.
+router.post('/notifications/test-selection', (req, res) => {
+  const schema = req.schema;
+  notify.ensureNotificationSettings(schema);
+  const s = schema.notificationSettings;
+  const hour = (v, fallback) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= 23 ? n : fallback;
+  };
+  s.enabled = !!req.body.enabled;
+  s.digestHour = hour(req.body.digestHour, s.digestHour);
+  s.quietStartHour = hour(req.body.quietStartHour, s.quietStartHour);
+  s.quietEndHour = hour(req.body.quietEndHour, s.quietEndHour);
+  const days = Number(req.body.retentionDays);
+  if (Number.isFinite(days) && days >= 1 && days <= 3650) s.retentionDays = Math.round(days);
+  Object.keys(notify.SOURCES).forEach(key => {
+    const mode = req.body[`mode__${key}`];
+    if (notify.MODES.includes(mode)) s.sources[key] = { ...(s.sources[key] || {}), mode };
+  });
+  schemaLib.persist(schema);
+
+  const chatId = (s.userChats || {})[req.currentUser.username];
+  if (!chatId) {
+    return res.redirect('/admin/notifications?error=' + encodeURIComponent(
+      'Settings saved, but there\u2019s no chat ID set for your own account yet \u2014 set one under Per-user chats first, then try again.'));
+  }
+  const token = secrets.getTelegramToken();
+  if (!token) {
+    return res.redirect('/admin/notifications?error=' + encodeURIComponent('Settings saved, but no bot token is configured yet.'));
+  }
+
+  (async () => {
+    const previews = notify.previewForAdmin(schema, s, new Date());
+    const mine = previews.find(p => p.recipient.kind === 'user' && String(p.recipient.chatId) === String(chatId));
+    const text = mine
+      ? `<b>Preview of your current selections</b>\n\n${mine.digestPreview}`
+      : '<b>Preview of your current selections</b>\n\nNothing would be sent right now — every enabled source has zero outstanding items for you at the moment.';
+    const result = await telegram.sendMessage(token, chatId, text);
+    if (result.ok) {
+      res.redirect('/admin/notifications?notice=' + encodeURIComponent('Settings saved and a preview of your selections was sent to your own chat.'));
+    } else {
+      res.redirect('/admin/notifications?error=' + encodeURIComponent('Settings saved, but the test send failed: ' + result.error.message));
+    }
+  })();
+});
+
+router.post('/notifications/group', (req, res) => {
+  const schema = req.schema;
+  notify.ensureNotificationSettings(schema);
+  const chatId = String(req.body.chatId || '').trim();
+  if (!chatId) return res.redirect('/admin/notifications?error=' + encodeURIComponent('Chat ID is required.'));
+  const asUser = String(req.body.asUser || '').trim();
+  if (asUser && !usersLib.getByUsername(asUser)) {
+    return res.redirect('/admin/notifications?error=' + encodeURIComponent('That user no longer exists.'));
+  }
+  schema.notificationSettings.groupChats.push({
+    id: 'g' + Date.now().toString(36),
+    chatId, label: String(req.body.label || '').trim(), asUser,
+  });
+  schemaLib.persist(schema);
+  res.redirect('/admin/notifications?notice=' + encodeURIComponent('Group chat added. Send a test message to confirm the bot can post there.'));
+});
+
+router.post('/notifications/group/:id/delete', (req, res) => {
+  const schema = req.schema;
+  notify.ensureNotificationSettings(schema);
+  schema.notificationSettings.groupChats = (schema.notificationSettings.groupChats || [])
+    .filter(g => String(g.id) !== String(req.params.id));
+  schemaLib.persist(schema);
+  res.redirect('/admin/notifications?notice=' + encodeURIComponent('Group chat removed.'));
+});
+
+router.post('/notifications/user-chat', (req, res) => {
+  const schema = req.schema;
+  notify.ensureNotificationSettings(schema);
+  const username = String(req.body.username || '').trim();
+  if (!usersLib.getByUsername(username)) {
+    return res.redirect('/admin/notifications?error=' + encodeURIComponent('Unknown user.'));
+  }
+  const chatId = String(req.body.chatId || '').trim();
+  if (chatId) schema.notificationSettings.userChats[username] = chatId;
+  else delete schema.notificationSettings.userChats[username];
+  schemaLib.persist(schema);
+  res.redirect('/admin/notifications?notice=' + encodeURIComponent(chatId ? `Chat ID saved for ${username}.` : `Chat ID cleared for ${username}.`));
+});
+
+// Data Health — read-only diagnostics over the whole store. Runs
+// inside the normal request cache, so a healthy install stays cheap
+// (one full-table scan per entity, reusing indexes across fk fields).
+router.get('/data-health', (req, res) => {
+  const dataHealth = require('../dataHealth');
+  const issues = dataHealth.runDataHealth(req.schema);
+  res.render('admin/data-health', { issues });
 });
 
 // ---- Idle session timeout settings ----------------------------------------
@@ -177,14 +687,14 @@ function reportFormArrays(body) {
   // in the form become "user didn't fill this one in," with no JS needed
   // to add/remove rows client-side.
   const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
-  const colExpr = arr(body.col_expr), colLabel = arr(body.col_label), colFormat = arr(body.col_format), colTotal = arr(body.col_total);
-  const columns = colExpr.map((expr, i) => ({ expr, label: colLabel[i] || '', format: colFormat[i] || 'none', total: colTotal[i] === '1' }));
+  const colExpr = arr(body.col_expr), colLabel = arr(body.col_label), colFormat = arr(body.col_format), colTotal = arr(body.col_total), colTagKey = arr(body.col_tagkey);
+  const columns = colExpr.map((expr, i) => ({ expr, label: colLabel[i] || '', format: colFormat[i] || 'none', total: colTotal[i] === '1', tagKey: colTagKey[i] || '' }));
 
   const paramKey = arr(body.param_key), paramLabel = arr(body.param_label), paramField = arr(body.param_field), paramDataKind = arr(body.param_datakind), paramAnchorTable = arr(body.param_anchortable), paramAnchorResolver = arr(body.param_anchorresolver);
   const parameters = paramField.map((field, i) => ({ key: paramKey[i] || '', label: paramLabel[i] || '', field, dataKind: paramDataKind[i] || '', anchorTable: paramAnchorTable[i] || '', anchorResolver: paramAnchorResolver[i] || '' }));
 
-  const aggExpr = arr(body.agg_expr), aggFn = arr(body.agg_fn), aggLabel = arr(body.agg_label), aggFormat = arr(body.agg_format), aggTotal = arr(body.agg_total);
-  const aggregates = aggExpr.map((expr, i) => ({ expr, fn: aggFn[i] || 'SUM', label: aggLabel[i] || '', format: aggFormat[i] || 'none', total: aggTotal[i] === '1' }));
+  const aggExpr = arr(body.agg_expr), aggFn = arr(body.agg_fn), aggLabel = arr(body.agg_label), aggFormat = arr(body.agg_format), aggTotal = arr(body.agg_total), aggTagKey = arr(body.agg_tagkey);
+  const aggregates = aggExpr.map((expr, i) => ({ expr, fn: aggFn[i] || 'SUM', label: aggLabel[i] || '', format: aggFormat[i] || 'none', total: aggTotal[i] === '1', tagKey: aggTagKey[i] || '' }));
 
   const hdrExpr = arr(body.hdr_expr), hdrLabel = arr(body.hdr_label), hdrRenderType = arr(body.hdr_rendertype),
         hdrRows = arr(body.hdr_rows), hdrFormat = arr(body.hdr_format), hdrColumn = arr(body.hdr_column);
@@ -290,7 +800,7 @@ router.post('/applets/:key', (req, res) => {
   const schema = req.schema;
   try {
     const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
-    const applet = schemaLib.updateApplet(schema, req.params.key, { ...req.body, columns: arr(req.body.columns) });
+    const applet = schemaLib.updateApplet(schema, req.params.key, { ...req.body, columns: arr(req.body.columns), detailFields: arr(req.body.detailFields) });
     schemaLib.persist(schema);
     res.redirect('/admin/applets?notice=' + encodeURIComponent(`"${applet.label}" saved.`));
   } catch (err) {
@@ -319,7 +829,7 @@ router.post('/applets/:key/delete', (req, res) => {
 // server translates position -> the actual instanceKey it assigns (by
 // array order, every save) before handing off to validateView.
 
-function viewFormApplets(body) {
+function viewFormApplets(body, schema) {
   const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
   const appletKeys = arr(body.applet_key);
   const parentPositions = arr(body.parent_position); // 1-based strings, or ''
@@ -340,7 +850,21 @@ function viewFormApplets(body) {
       }
       parentInstanceKey = instanceKeys[parentIdx];
     }
-    return { instanceKey: instanceKeys[i], appletKey: r.appletKey, parentInstanceKey, linkField: r.linkField || '' };
+    let linkField = r.linkField || '';
+    // Siebel-style shared active row: a Detail applet that is a child of a
+    // list applet on the SAME table simply shows the parent's selected
+    // record, so its link is always that table's primary key. Set it
+    // automatically — the user just picks the Parent Row, no need to know
+    // or type the PK into the Link Field.
+    if (schema && parentInstanceKey) {
+      const applet = schemaLib.appletByKey(schema, r.appletKey);
+      const parentApplet = schemaLib.appletByKey(schema, rows[parseInt(r.parentPosition, 10) - 1].appletKey);
+      if (applet && applet.type === 'detail' && parentApplet && parentApplet.baseTable === applet.baseTable) {
+        const ent = schema.entities[applet.baseTable];
+        if (ent) linkField = ent.pk;
+      }
+    }
+    return { instanceKey: instanceKeys[i], appletKey: r.appletKey, parentInstanceKey, linkField };
   });
 }
 
@@ -355,7 +879,7 @@ router.get('/composed-views/new', (req, res) => {
 router.post('/composed-views', (req, res) => {
   const schema = req.schema;
   try {
-    const applets = viewFormApplets(req.body);
+    const applets = viewFormApplets(req.body, req.schema);
     const view = schemaLib.addView(schema, { ...req.body, applets });
     schemaLib.persist(schema);
     res.redirect('/admin/composed-views?notice=' + encodeURIComponent(`"${view.label}" created.`));
@@ -373,7 +897,7 @@ router.get('/composed-views/:key/edit', (req, res) => {
 router.post('/composed-views/:key', (req, res) => {
   const schema = req.schema;
   try {
-    const applets = viewFormApplets(req.body);
+    const applets = viewFormApplets(req.body, req.schema);
     const view = schemaLib.updateView(schema, req.params.key, { ...req.body, applets });
     schemaLib.persist(schema);
     res.redirect('/admin/composed-views?notice=' + encodeURIComponent(`"${view.label}" saved.`));
@@ -457,14 +981,39 @@ router.get('/picklists', (req, res) => {
 });
 
 router.get('/picklists/new', (req, res) => {
-  res.render('admin/picklist-edit', { picklist: null, entities: req.schema.entities, error: req.query.error });
+  res.render('admin/picklist-edit', { picklist: null, entities: req.schema.entities, error: req.query.error, notice: req.query.notice });
 });
+
+// Reads the bracket-notation rows a picklist/field-option editor submits
+// (values[0][key], values[0][label], values[0][active], values[1][...],
+// ...) into a clean array. qs parses this into an object keyed by
+// whatever index each row used (not necessarily sequential — new rows
+// added client-side get a fresh non-conflicting index), so this reads
+// Object.values() rather than assuming a real array.
+function readBracketedRows(body, paramName) {
+  const raw = body[paramName];
+  if (!raw || typeof raw !== 'object') return [];
+  return Object.values(raw).map(row => {
+    // The active flag is submitted as a hidden "off" followed by a
+    // checkbox "on" sharing the same bracketed name, so an unchecked box
+    // yields "off" alone but a checked one yields BOTH — qs collects
+    // same-key duplicates into an array (submission order), so the last
+    // entry reflects whether the checkbox actually fired.
+    let activeRaw = row && row.active;
+    if (Array.isArray(activeRaw)) activeRaw = activeRaw[activeRaw.length - 1];
+    return {
+      key: (row && row.key) || '',
+      label: (row && row.label) || '',
+      active: activeRaw !== 'off',
+    };
+  });
+}
 
 router.post('/picklists', (req, res) => {
   const schema = req.schema;
   try {
-    const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
-    const picklist = schemaLib.addPicklist(schema, { ...req.body, values: arr(req.body.value) });
+    const values = readBracketedRows(req.body, 'values');
+    const picklist = schemaLib.addPicklist(schema, { ...req.body, values });
     schemaLib.persist(schema);
     res.redirect(`/admin/picklists/${picklist.key}/edit?notice=` + encodeURIComponent(`"${picklist.label}" created.`));
   } catch (err) {
@@ -481,17 +1030,8 @@ router.get('/picklists/:key/edit', (req, res) => {
 router.post('/picklists/:key', (req, res) => {
   const schema = req.schema;
   try {
-    const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
-    const submittedValues = arr(req.body.value);
-    const activeFlags = arr(req.body.active); // one 'on'/undefined per submitted value, same order
-    const values = submittedValues.map((v, i) => ({ value: v, active: activeFlags[i] === 'on' }));
+    const values = readBracketedRows(req.body, 'values');
     const picklist = schemaLib.updatePicklist(schema, req.params.key, { ...req.body, values });
-    // updatePicklist preserves prior active flags by matching on value
-    // text — but the form itself is the source of truth for a value the
-    // admin just explicitly toggled, so apply those overrides too.
-    if (picklist.sourceType === 'static') {
-      values.forEach(v => { const real = picklist.values.find(x => x.value === v.value); if (real) real.active = v.active; });
-    }
     schemaLib.persist(schema);
     res.redirect('/admin/picklists?notice=' + encodeURIComponent(`"${picklist.label}" saved.`));
   } catch (err) {
@@ -510,6 +1050,147 @@ router.post('/picklists/:key/delete', (req, res) => {
   }
 });
 
+// ---- Template Library (bill/document templates) -------------------------
+
+router.get('/templates', (req, res) => {
+  res.render('admin/templates', { templates: schemaLib.templatesFor(req.schema), entities: req.schema.entities, notice: req.query.notice, error: req.query.error });
+});
+
+router.get('/templates/new', (req, res) => {
+  res.render('admin/template-new', {
+    entities: Object.values(req.schema.entities), reportDefs: schemaLib.reportDefsFor(req.schema),
+    starters: templateStarters, error: req.query.error, notice: req.query.notice,
+  });
+});
+
+router.post('/templates', (req, res) => {
+  const schema = req.schema;
+  try {
+    const starter = templateStarters.find(s => s.key === req.body.starter);
+    const kind = req.body.baseKind;
+    const template = schemaLib.addTemplate(schema, kind === 'email' ? {
+      baseKind: 'email', label: req.body.label, baseTable: req.body.baseTable,
+      emailTo: req.body.emailTo, emailCc: req.body.emailCc, emailBcc: req.body.emailBcc,
+      emailSubject: req.body.emailSubject, htmlBody: req.body.htmlBody || '',
+    } : {
+      baseKind: kind === 'report' ? 'report' : 'table',
+      label: req.body.label,
+      baseTable: req.body.baseTable,
+      htmlBody: starter ? starter.htmlBody : '',
+    });
+    schemaLib.persist(schema);
+    res.redirect(`/admin/templates/${template.key}/edit?notice=` + encodeURIComponent(`"${template.label}" created.`));
+  } catch (err) {
+    res.redirect('/admin/templates/new?error=' + encodeURIComponent(err.message));
+  }
+});
+
+// Quick-iteration preview while editing a template — the merged HTML
+// directly, not a PDF (PDF generation is real work; this is meant for
+// "does this look right" while actively typing merge tags).
+router.get('/templates/:key/preview', (req, res) => {
+  const template = schemaLib.templateByKey(req.schema, req.params.key);
+  if (!template) return res.status(404).send('Unknown template.');
+  const entity = req.schema.entities[template.baseTable];
+  if (!entity) return res.status(404).send('Base table no longer exists.');
+  const record = db.getById(entity.key, entity.pk, req.query.id);
+  if (!record) return res.status(404).send(`${entity.singular} "${req.query.id}" not found.`);
+  const rendered = schemaLib.renderBillTemplate(req.schema, template, record);
+  if (rendered.error) return res.status(400).send(rendered.error);
+  res.send(rendered.html);
+});
+
+router.get('/templates/:key/edit', (req, res) => {
+  const template = schemaLib.templateByKey(req.schema, req.params.key);
+  if (!template) return res.status(404).send('Unknown template.');
+
+  if (template.baseKind === 'email') {
+    const baseEntity = req.schema.entities[template.baseTable];
+    return res.render('admin/template-edit-email', { template, baseEntity, error: req.query.error, notice: req.query.notice });
+  }
+
+  if (template.baseKind === 'report') {
+    const reportDef = schemaLib.reportDefByKey(req.schema, template.baseTable);
+    if (!reportDef) return res.status(404).send('This template\'s report no longer exists.');
+    const anchorParam = (reportDef.parameters || []).find(p => p.key === reportDef.headerAnchorParam);
+    const anchorEntity = anchorParam ? req.schema.entities[anchorParam.anchorRef] : null;
+    const columnItems = reportDef.groupBy
+      ? [{ label: reportDef.groupByLabel || 'Group' }, ...(reportDef.aggregates || [])]
+      : (reportDef.columns || []);
+    const columnKeyMap = schemaLib.reportColumnKeyMap(columnItems);
+    // Same "one hop deeper" tree the table-based editor's field-picker
+    // already offers — e.g. a Tenant anchor's own T_MappedTo fk reaches
+    // Landlord fields, which is exactly what a template combining
+    // tenant + landlord details on one document needs.
+    const anchorRelatedTrees = anchorEntity ? anchorEntity.fields.filter(f => f.type === 'fk').map(fk => ({
+      fkFieldName: fk.name, fkLabel: fk.label, targetEntity: req.schema.entities[fk.ref],
+    })).filter(r => r.targetEntity) : [];
+    return res.render('admin/template-edit-report', {
+      template, reportDef, anchorEntity, anchorRelatedTrees, columnKeyMap,
+      hasTotals: reportDef.groupBy ? (reportDef.aggregates || []).some(a => a.total) : (reportDef.columns || []).some(c => c.total),
+      error: req.query.error, notice: req.query.notice,
+    });
+  }
+
+  const baseEntity = req.schema.entities[template.baseTable];
+  // The field-picker's tree: the base table's own fields, plus every fk
+  // relationship reachable from it (one hop deep in the tree UI, though
+  // the merge engine itself supports any depth — a user can still hand-type
+  // a deeper chain like {{A.B.C}} if they know it, the picker just doesn't
+  // walk more than one level deep to keep the UI itself simple).
+  const fkFields = baseEntity.fields.filter(f => f.type === 'fk');
+  const relatedTrees = fkFields.map(fk => ({
+    fkFieldName: fk.name, fkLabel: fk.label,
+    targetEntity: req.schema.entities[fk.ref],
+  })).filter(r => r.targetEntity);
+  // Child tables eligible for the Line Items loop: any table with an fk
+  // field pointing back at this base table.
+  const childCandidates = Object.values(req.schema.entities)
+    .filter(e => e.key !== template.baseTable)
+    .map(e => ({ entity: e, fkFields: e.fields.filter(f => f.type === 'fk' && f.ref === template.baseTable) }))
+    .filter(c => c.fkFields.length > 0);
+  res.render('admin/template-edit', {
+    template, baseEntity, fkFields, relatedTrees, childCandidates,
+    error: req.query.error, notice: req.query.notice,
+  });
+});
+
+router.post('/templates/:key', (req, res) => {
+  const schema = req.schema;
+  try {
+    const existing = schemaLib.templateByKey(schema, req.params.key);
+    const input = (existing && existing.baseKind === 'email') ? {
+      baseKind: 'email', label: req.body.label, baseTable: existing.baseTable,
+      emailTo: req.body.emailTo, emailCc: req.body.emailCc, emailBcc: req.body.emailBcc,
+      emailSubject: req.body.emailSubject, htmlBody: req.body.htmlBody,
+    } : {
+      baseKind: req.body.baseKind === 'report' ? 'report' : 'table',
+      label: req.body.label,
+      baseTable: req.body.baseTable,
+      htmlBody: req.body.htmlBody,
+      pageOrientation: req.body.pageOrientation,
+      lineItemsChildTable: req.body.lineItemsChildTable || null,
+      lineItemsFkField: req.body.lineItemsFkField || null,
+    };
+    const updated = schemaLib.updateTemplate(schema, req.params.key, input);
+    schemaLib.persist(schema);
+    res.redirect(`/admin/templates/${updated.key}/edit?notice=` + encodeURIComponent('Template saved.'));
+  } catch (err) {
+    res.redirect(`/admin/templates/${req.params.key}/edit?error=` + encodeURIComponent(err.message));
+  }
+});
+
+router.post('/templates/:key/delete', (req, res) => {
+  const schema = req.schema;
+  try {
+    schemaLib.deleteTemplate(schema, req.params.key);
+    schemaLib.persist(schema);
+    res.redirect('/admin/templates?notice=' + encodeURIComponent('Template deleted.'));
+  } catch (err) {
+    res.redirect('/admin/templates?error=' + encodeURIComponent(err.message));
+  }
+});
+
 router.get('/backup/download', (req, res) => {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   res.setHeader('Content-Type', 'application/zip');
@@ -517,6 +1198,13 @@ router.get('/backup/download', (req, res) => {
   const archive = archiver('zip', { zlib: { level: 6 } });
   archive.on('error', (err) => { try { res.end(); } catch (e) { /* client gone */ } });
   archive.pipe(res);
+  // NOTE: this is an explicit ALLOWLIST of files, and that is
+  // load-bearing for security — data/secrets.json (the Telegram bot
+  // token) lives in this same directory and must never enter a backup
+  // archive, since backups get downloaded, emailed and restored on
+  // other machines. If this is ever changed to archive the data
+  // directory wholesale, secrets.json must be explicitly excluded.
+  // See secrets.js for the full rationale.
   if (fs.existsSync(SCHEMA_FILE)) archive.file(SCHEMA_FILE, { name: 'schema.json' });
   if (fs.existsSync(DB_FILE)) archive.file(DB_FILE, { name: 'db.json' });
   if (fs.existsSync(USERS_FILE)) archive.file(USERS_FILE, { name: 'users.json' });
@@ -593,6 +1281,17 @@ router.post('/backup/restore', uploadBackupMiddleware, (req, res) => {
     // Commit: schema.json always gets written. db.json/users.json/uploads
     // only get touched for a full (non-schema-only) restore.
     atomicWriteFileSync(SCHEMA_FILE, JSON.stringify(schemaData, null, 2));
+    // A backup taken before a built-in module's tables existed restores a
+    // schema WITHOUT them — and module table creation otherwise only runs
+    // at boot, so the Bills tab (and its tables) would silently vanish
+    // until the next restart. Re-run the same idempotent ensure step here
+    // so a restore behaves exactly like a fresh boot of this version.
+    // Runs after the schema commit (it loads from disk) and before the
+    // redirect, so the very next page render already has the tables.
+    billsLib.ensureBillsTables();
+    remindersLib.ensureReminderTables();
+    taxLib.ensureTaxTables();
+    notify.ensureNotificationTables();
     if (!isSchemaOnly) {
       atomicWriteFileSync(DB_FILE, JSON.stringify(dbData, null, 2));
       if (usersData) atomicWriteFileSync(USERS_FILE, JSON.stringify(usersData, null, 2));
@@ -813,12 +1512,72 @@ router.get('/:entity/export.csv', (req, res) => {
   if (!entity) return res.status(404).send('Unknown table.');
   const fields = exportableFields(entity);
   const header = fields.map(f => f.name);
+
+  // Read the same session-based list state the list view uses, so the
+  // export matches exactly what the user is currently seeing.
+  const listState = (req.session.listState && req.session.listState[req.params.entity]) || { q: '', filters: {}, sort: '', dir: 'asc' };
+  let allRows = db.getAll(entity.key);
+
+  // Text search (same as the list route's q filter)
+  const q = (listState.q || '').trim().toLowerCase();
+  if (q) {
+    const searchFields = entity.fields.filter(f => !['spacer','section'].includes(f.type));
+    allRows = allRows.filter(r => searchFields.some(f => String(r[f.name] ?? '').toLowerCase().includes(q)));
+  }
+
+  // Field filters from session (same keys as the list route)
+  const filters = listState.filters || {};
+  entity.fields.forEach(f => {
+    const kind = schemaLib.filterKindFor(f);
+    if (kind === 'date-range' || kind === 'number-range') {
+      const from = (filters[`f_${f.name}_from`] || '').trim();
+      const to = (filters[`f_${f.name}_to`] || '').trim();
+      if (from || to) {
+        allRows = allRows.filter(r => {
+          const v = r[f.name];
+          if (v == null || v === '') return false;
+          if (kind === 'date-range') {
+            if (from && String(v) < from) return false;
+            if (to && String(v) > to) return false;
+          } else {
+            const n = Number(v);
+            if (from && n < Number(from)) return false;
+            if (to && n > Number(to)) return false;
+          }
+          return true;
+        });
+      }
+    } else {
+      const fv = (filters[`f_${f.name}`] || '').trim();
+      if (fv) {
+        allRows = allRows.filter(r => {
+          if (f.type === 'bool') return (r[f.name] ? 'true' : 'false') === fv;
+          return String(r[f.name] ?? '') === fv;
+        });
+      }
+    }
+  });
+
+  // Sort (from session state)
+  const sortField = listState.sort || entity.sortField || '';
+  const sortDir = (listState.sort ? listState.dir : entity.sortDir) === 'desc' ? -1 : 1;
+  if (sortField && entity.fields.some(f => f.name === sortField)) {
+    allRows.sort((a, b) => {
+      const va = a[sortField], vb = b[sortField];
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return va < vb ? -sortDir : va > vb ? sortDir : 0;
+    });
+  }
+
   const rows = [header];
-  db.getAll(entity.key).forEach(r => {
+  allRows.forEach(r => {
     rows.push(fields.map(f => {
       const v = r[f.name];
       if (v === undefined || v === null) return '';
       if (f.type === 'bool') return v ? 'true' : 'false';
+      if (f.type === 'picklist') return v === '' ? '' : String(schemaLib.resolvePicklistLabel(req.schema, entity, f, v));
       return String(v);
     }));
   });
@@ -827,10 +1586,50 @@ router.get('/:entity/export.csv', (req, res) => {
   res.send('\uFEFF' + csv.stringify(rows));
 });
 
+// ---- Trash (soft-deleted records) ---------------------------------------
+// A record's normal Delete button soft-deletes rather than removing it
+// outright (see server.js's delete route + db.js's softDelete) — this is
+// where those recoverable deletions actually live: restore them, or
+// purge one for real before the scheduled 30-day auto-purge would.
+
+router.get('/:entity/trash', (req, res) => {
+  const entity = req.schema.entities[req.params.entity];
+  if (!entity) return res.status(404).send('Unknown table.');
+  const trashedRows = db.getTrash(entity.key).map(r => schemaLib.withComputedFields(req.schema, entity, r));
+  res.render('admin/trash', { entity, rows: trashedRows, display: (e, r) => schemaLib.display(e, r, req.schema), notice: req.query.notice, error: req.query.error });
+});
+
+router.post('/:entity/trash/:id/restore', (req, res) => {
+  const entity = req.schema.entities[req.params.entity];
+  if (!entity) return res.status(404).send('Unknown table.');
+  const restored = db.restore(entity.key, entity.pk, req.params.id);
+  if (!restored) return res.redirect(`/admin/${entity.key}/trash?error=` + encodeURIComponent('Record not found in Trash.'));
+  res.redirect(`/${entity.key}/${encodeURIComponent(req.params.id)}?notice=` + encodeURIComponent('Restored from Trash.'));
+});
+
+router.post('/:entity/trash/:id/purge', (req, res) => {
+  const entity = req.schema.entities[req.params.entity];
+  if (!entity) return res.status(404).send('Unknown table.');
+  const record = db.getById(entity.key, entity.pk, req.params.id);
+  db.remove(entity.key, entity.pk, req.params.id);
+  // Image files were deliberately left alone at soft-delete time (in case
+  // of a restore) — this is the actual permanent removal, so they get
+  // cleaned up now instead.
+  if (record) {
+    entity.fields.filter(f => f.type === 'image').forEach(f => {
+      if (record[f.name]) {
+        const p = path.join(UPLOADS_DIR, entity.key, f.name, record[f.name]);
+        if (fs.existsSync(p)) try { fs.unlinkSync(p); } catch (e) { /* best-effort */ }
+      }
+    });
+  }
+  res.redirect(`/admin/${entity.key}/trash?notice=` + encodeURIComponent('Permanently deleted.'));
+});
+
 router.get('/:entity/import', (req, res) => {
   const entity = req.schema.entities[req.params.entity];
   if (!entity) return res.status(404).send('Unknown table.');
-  res.render('admin/import', { entity, fields: importableFields(entity), error: req.query.error, notice: req.query.notice });
+  res.render('admin/import', { entity, fields: importableFields(entity), error: req.query.error, notice: req.query.notice, batchId: req.query.batchId || null, batchCount: req.query.batchCount || null });
 });
 
 router.post('/:entity/import', uploadCsvMiddleware, (req, res) => {
@@ -884,6 +1683,32 @@ router.post('/:entity/import', uploadCsvMiddleware, (req, res) => {
           val = val === '' ? '' : Number(val);
         } else if (f.type === 'percent') {
           val = val === '' ? '' : Number(val) / 100;
+        } else if (f.type === 'date' || f.type === 'timestamp') {
+          if (val !== '') {
+            const preferDayFirst = (req.body.dateFormat || 'dd-mm-yyyy') === 'dd-mm-yyyy';
+            const normalized = schemaLib.normalizeDateValue(val, preferDayFirst);
+            if (normalized === null) {
+              throw new Error(`Row ${rowNum}: "${val}" is not a recognizable date for field "${f.label}" (${f.name}). Expected formats: dd-mm-yyyy, dd/mm/yyyy, yyyy-mm-dd, dd-Mon-yyyy, or an Excel serial number. No rows were imported.`);
+            }
+            val = normalized;
+          }
+        } else if (f.type === 'picklist') {
+          // A CSV cell holds the LABEL a person actually typed/exported —
+          // records store the stable KEY, so resolve label -> key against
+          // this field's current active options. An unrecognized label
+          // (renamed/retired since the file was made, or a typo) errors
+          // clearly rather than silently storing text that matches nothing.
+          const raw2 = String(val).trim();
+          if (raw2 === '') {
+            val = '';
+          } else {
+            const opts = schemaLib.resolvePicklistOptions(req.schema, entity, f);
+            const match = opts.find(o => o.label === raw2) || opts.find(o => o.label.toLowerCase() === raw2.toLowerCase());
+            if (!match) {
+              throw new Error(`Row ${rowNum}: "${raw2}" is not a current option for "${f.label}" (${f.name}). Valid options: ${opts.map(o => o.label).join(', ') || '(none configured)'}. No rows were imported.`);
+            }
+            val = match.key;
+          }
         }
         record[f.name] = val;
       });
@@ -896,7 +1721,12 @@ router.post('/:entity/import', uploadCsvMiddleware, (req, res) => {
       toInsert.push(record);
     });
 
-    // Every row validated — now commit all-or-nothing.
+    // Every row validated — now commit all-or-nothing. Tagged with a
+    // batch ID (an internal property, not a real schema field — never
+    // rendered or exported, same as how other internal-only properties
+    // already work) so this specific import can be undone as a unit
+    // afterward, without needing to hand-pick which rows came from it.
+    const importBatchId = `imp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     let nextAuto = null;
     toInsert.forEach(record => {
       if (record.__autoPk) {
@@ -905,16 +1735,49 @@ router.post('/:entity/import', uploadCsvMiddleware, (req, res) => {
         delete record.__autoPk;
       }
       schemaLib.assignSeriesFields(schema, entity, record);
+      record.__importBatchId = importBatchId;
       db.insert(entity.key, record);
       if (entity.auditEnabled) {
         audit.log({ entityKey: entity.key, recordId: record[entity.pk], action: 'create', username: req.currentUser.username, before: null, after: record });
       }
     });
 
-    res.redirect(`/admin/${entity.key}/import?notice=${encodeURIComponent(`Imported ${toInsert.length} record(s).`)}`);
+    res.redirect(`/admin/${entity.key}/import?notice=${encodeURIComponent(`Imported ${toInsert.length} record(s).`)}&batchId=${encodeURIComponent(importBatchId)}&batchCount=${toInsert.length}`);
   } catch (err) {
     res.redirect(`/admin/${req.params.entity}/import?error=` + encodeURIComponent(err.message));
   }
+});
+
+// Undoes one import batch as a unit — blocks the WHOLE undo if ANY row
+// from that batch is referenced by something else (e.g. a Bill created
+// afterward pointing at an imported Tenant), rather than a partial undo
+// that deletes what it safely can and leaves the rest — matching the
+// same "block, don't silently orphan" principle used for regular
+// deletes, and much simpler to reason about and explain than a partial
+// result would be.
+router.post('/:entity/import/undo/:batchId', (req, res) => {
+  const schema = req.schema;
+  const entity = schema.entities[req.params.entity];
+  if (!entity) return res.status(404).send('Unknown table.');
+  const rows = db.getAll(entity.key).filter(r => r.__importBatchId === req.params.batchId);
+  if (rows.length === 0) {
+    return res.redirect(`/admin/${entity.key}/import?error=` + encodeURIComponent('That import batch has nothing left to undo (already undone, or too old to still be tracked).'));
+  }
+  const blockedBy = [];
+  rows.forEach(r => {
+    const blockers = schemaLib.findBlockingReferences(schema, entity.key, r[entity.pk]);
+    blockers.forEach(b => blockedBy.push(`${b.count} ${b.entityLabel} record(s) reference "${r[entity.pk]}"`));
+  });
+  if (blockedBy.length > 0) {
+    return res.redirect(`/admin/${entity.key}/import?error=` + encodeURIComponent(`Cannot undo: ${blockedBy.join('; ')} — remove or reassign those first.`));
+  }
+  rows.forEach(r => {
+    db.remove(entity.key, entity.pk, r[entity.pk]);
+    if (entity.auditEnabled) {
+      audit.log({ entityKey: entity.key, recordId: r[entity.pk], action: 'delete', username: req.currentUser.username, before: r, after: null });
+    }
+  });
+  res.redirect(`/admin/${entity.key}/import?notice=` + encodeURIComponent(`Undone: ${rows.length} record(s) from that import removed.`));
 });
 
 // ---- fields -------------------------------------------------------------
@@ -939,6 +1802,10 @@ router.get('/:entity/fields', (req, res) => {
 router.post('/:entity/fields', (req, res) => {
   const schema = req.schema;
   try {
+    // Brand-new field: the compact "comma-separated" bootstrap input is
+    // fine here since there are no existing records/keys to preserve yet.
+    const picklistValues = String(req.body.newOptionsCsv || '')
+      .split(',').map(s => s.trim()).filter(Boolean).map(label => ({ label }));
     schemaLib.addField(schema, req.params.entity, {
       name: req.body.name,
       label: req.body.label,
@@ -949,7 +1816,7 @@ router.post('/:entity/fields', (req, res) => {
       rows: req.body.rows,
       formula: req.body.formula,
       format: req.body.format,
-      options: req.body.options,
+      picklistValues,
       seriesGroupPath: req.body.seriesGroupPath,
       seriesTrackerEntity: req.body.seriesTrackerEntity,
       seriesTrackerGroupField: req.body.seriesTrackerGroupField,
@@ -969,7 +1836,16 @@ router.post('/:entity/fields', (req, res) => {
       picklistSource: req.body.picklistSource,
       picklistKey: req.body.picklistKey,
       picklistConstraintField: req.body.picklistConstraintField,
+      fkWhere: req.body.fkWhere,
     });
+    const newField = schema.entities[req.params.entity].fields.find(f => f.name === schemaLib.safeFieldName(req.body.name));
+    // Schema changes (unlike record data changes) were never audited at
+    // all before this — a field silently changing type, say, could break
+    // every report/formula that touched it with no trace of when or by
+    // whom. Reuses the same audit.js infrastructure as record changes,
+    // distinguished by an entityKey prefixed "schema:" rather than a
+    // separate logging system.
+    audit.log({ entityKey: `schema:${req.params.entity}`, recordId: newField ? newField.name : req.body.name, action: 'create', username: req.currentUser.username, before: null, after: newField });
     schemaLib.persist(schema);
     res.redirect(`/admin/${req.params.entity}/fields?notice=${encodeURIComponent('Field added.')}`);
   } catch (err) {
@@ -980,6 +1856,7 @@ router.post('/:entity/fields', (req, res) => {
 router.post('/:entity/fields/:field', (req, res) => {
   const schema = req.schema;
   try {
+    const before = { ...schema.entities[req.params.entity].fields.find(f => f.name === req.params.field) };
     schemaLib.updateField(schema, req.params.entity, req.params.field, {
       label: req.body.label,
       type: req.body.type,
@@ -989,7 +1866,7 @@ router.post('/:entity/fields/:field', (req, res) => {
       rows: req.body.rows,
       formula: req.body.formula,
       format: req.body.format,
-      options: req.body.options,
+      picklistValues: readBracketedRows(req.body, 'picklistValues'),
       seriesGroupPath: req.body.seriesGroupPath,
       seriesTrackerEntity: req.body.seriesTrackerEntity,
       seriesTrackerGroupField: req.body.seriesTrackerGroupField,
@@ -1009,7 +1886,10 @@ router.post('/:entity/fields/:field', (req, res) => {
       picklistSource: req.body.picklistSource,
       picklistKey: req.body.picklistKey,
       picklistConstraintField: req.body.picklistConstraintField,
+      fkWhere: req.body.fkWhere, fkBulkLink: req.body.fkBulkLink === "on",
     });
+    const after = schema.entities[req.params.entity].fields.find(f => f.name === req.params.field);
+    audit.log({ entityKey: `schema:${req.params.entity}`, recordId: req.params.field, action: 'update', username: req.currentUser.username, before, after });
     schemaLib.persist(schema);
     res.redirect(`/admin/${req.params.entity}/fields?notice=${encodeURIComponent('Field updated.')}`);
   } catch (err) {
@@ -1020,7 +1900,9 @@ router.post('/:entity/fields/:field', (req, res) => {
 router.post('/:entity/fields/:field/delete', (req, res) => {
   const schema = req.schema;
   try {
+    const before = { ...schema.entities[req.params.entity].fields.find(f => f.name === req.params.field) };
     schemaLib.deleteField(schema, req.params.entity, req.params.field);
+    audit.log({ entityKey: `schema:${req.params.entity}`, recordId: req.params.field, action: 'delete', username: req.currentUser.username, before, after: null });
     schemaLib.persist(schema);
     res.redirect(`/admin/${req.params.entity}/fields?notice=${encodeURIComponent('Field deleted.')}`);
   } catch (err) {
@@ -1070,12 +1952,16 @@ router.get('/:entity/views', (req, res) => {
     if (setting.filterField) {
       valueField = targetEntity.fields.find(f => f.name === setting.filterField);
       if (valueField && valueField.type === 'picklist') {
-        valueOptions = schemaLib.picklistOptions(valueField);
+        // applyAppletFilter compares against the record's RAW stored value
+        // (the key, not the label) — same reasoning as the fk branch just
+        // below, which already offers {value: PK, label: display name}.
+        valueOptions = schemaLib.resolvePicklistOptions(req.schema, targetEntity, valueField)
+          .map(o => ({ value: o.key, label: o.label }));
       } else if (valueField && valueField.type === 'fk') {
         const refEntity = req.schema.entities[valueField.ref];
         valueOptions = refEntity ? db.getAll(refEntity.key).map(r => ({
           value: r[refEntity.pk],
-          label: `${r[refEntity.pk]} \u2014 ${schemaLib.display(refEntity, r)}`,
+          label: `${r[refEntity.pk]} \u2014 ${schemaLib.display(refEntity, r, req.schema)}`,
         })) : [];
       }
     }
@@ -1084,7 +1970,7 @@ router.get('/:entity/views', (req, res) => {
 
   res.render('admin/views', {
     entity, included, excluded, filterIncluded, filterExcluded, shownApplets, availableApplets: discoverable,
-    filterKindFor: schemaLib.filterKindFor,
+    filterKindFor: schemaLib.filterKindFor, numericFields: schemaLib.numericFieldsFor(entity),
     error: req.query.error, notice: req.query.notice,
   });
 });
@@ -1174,6 +2060,21 @@ router.post('/:entity/views/sort', (req, res) => {
   }
 });
 
+router.post('/:entity/views/totals', (req, res) => {
+  const schema = req.schema;
+  try {
+    const arr = (v) => (Array.isArray(v) ? v : (v === undefined ? [] : [v]));
+    const fields = arr(req.body.totalField);
+    const fns = arr(req.body.totalFn);
+    const totals = fields.map((field, i) => ({ field, fn: fns[i] }));
+    schemaLib.updateListTotals(schema, req.params.entity, totals);
+    schemaLib.persist(schema);
+    res.redirect(`/admin/${req.params.entity}/views?notice=${encodeURIComponent('List Totals saved.')}`);
+  } catch (err) {
+    res.redirect(`/admin/${req.params.entity}/views?error=` + encodeURIComponent(err.message));
+  }
+});
+
 // ---- users & permissions --------------------------------------------------
 
 function readPermissionsFromBody(body, schema) {
@@ -1184,6 +2085,10 @@ function readPermissionsFromBody(body, schema) {
       read: body[`perm_${key}_read`] === 'on',
       update: body[`perm_${key}_update`] === 'on',
       delete: body[`perm_${key}_delete`] === 'on',
+      // 'email' = may send an email (from a record) for this table. Only
+      // meaningful where the table has email templates; the matrix only
+      // renders the checkbox there, so it's absent (false) elsewhere.
+      email: body[`perm_${key}_email`] === 'on',
     };
   });
   return permissions;
@@ -1251,3 +2156,152 @@ router.get('/audit', (req, res) => {
 });
 
 module.exports = router;
+
+// ---- Themes ----------------------------------------------------------------
+router.get('/themes', (req, res) => {
+  res.render('admin/themes', { error: req.query.error, notice: req.query.notice, customTheme: {} });
+});
+router.post('/themes', (req, res) => {
+  // Theme is persisted per-device in localStorage by the client JS — this
+  // POST just redirects back with a notice so it feels like a save.
+  const theme = req.body.theme || 'siebel';
+  res.redirect('/admin/themes?notice=' + encodeURIComponent('Theme set to ' + theme + '. Saved in your browser for this device.'));
+});
+
+// ---- Bulk Generate ---------------------------------------------------------
+router.get('/bulk-generate', (req, res) => {
+  const schema = req.schema;
+  schemaLib.ensureBulkGenerateProfiles(schema);
+  res.render('admin/bulk-generate', { profiles: schema.bulkGenerateProfiles, entities: schema.entities, error: req.query.error, notice: req.query.notice });
+});
+
+router.post('/bulk-generate/profile', (req, res) => {
+  const schema = req.schema;
+  try {
+    const mappings = [];
+    const tfs = [].concat(req.body.map_target || []);
+    const svs = [].concat(req.body.map_value || []);
+    tfs.forEach((tf, i) => { if (tf && tf.trim()) mappings.push({ targetField: tf.trim(), value: (svs[i] || '').trim() }); });
+    schemaLib.addBulkGenerateProfile(schema, {
+      label: req.body.label, sourceTable: req.body.sourceTable, sourceFilter: req.body.sourceFilter,
+      sourceSort: req.body.sourceSort, targetTable: req.body.targetTable, fieldMappings: mappings,
+      monthField: req.body.monthField, dedupField: req.body.dedupField, dedupSourceField: req.body.dedupSourceField,
+    });
+    res.redirect('/admin/bulk-generate?notice=' + encodeURIComponent('Profile created.'));
+  } catch (e) { res.redirect('/admin/bulk-generate?error=' + encodeURIComponent(e.message)); }
+});
+
+router.post('/bulk-generate/:key/delete', (req, res) => {
+  schemaLib.deleteBulkGenerateProfile(req.schema, req.params.key);
+  res.redirect('/admin/bulk-generate?notice=' + encodeURIComponent('Profile deleted.'));
+});
+
+router.get('/bulk-generate/:key/edit', (req, res) => {
+  const schema = req.schema;
+  schemaLib.ensureBulkGenerateProfiles(schema);
+  const profile = (schema.bulkGenerateProfiles || []).find(p => p.key === req.params.key);
+  if (!profile) return res.redirect('/admin/bulk-generate?error=' + encodeURIComponent('Unknown profile.'));
+  res.render('admin/bulk-generate-edit', { profile, entities: schema.entities, error: req.query.error, notice: req.query.notice });
+});
+
+router.post('/bulk-generate/:key/edit', (req, res) => {
+  const schema = req.schema;
+  try {
+    const mappings = [];
+    const tfs = [].concat(req.body.map_target || []);
+    const svs = [].concat(req.body.map_value || []);
+    tfs.forEach((tf, i) => { if (tf && tf.trim()) mappings.push({ targetField: tf.trim(), value: (svs[i] || '').trim() }); });
+    schemaLib.updateBulkGenerateProfile(schema, req.params.key, {
+      label: req.body.label, sourceFilter: req.body.sourceFilter,
+      sourceSort: req.body.sourceSort, fieldMappings: mappings,
+      monthField: req.body.monthField, dedupField: req.body.dedupField, dedupSourceField: req.body.dedupSourceField,
+    });
+    schemaLib.persist(schema);
+    res.redirect('/admin/bulk-generate?notice=' + encodeURIComponent('Profile updated.'));
+  } catch (e) { res.redirect(`/admin/bulk-generate/${req.params.key}/edit?error=` + encodeURIComponent(e.message)); }
+});
+
+router.post('/bulk-generate/:key/run', (req, res) => {
+  const schema = req.schema;
+  const profile = (schema.bulkGenerateProfiles || []).find(p => p.key === req.params.key);
+  if (!profile) return res.redirect('/admin/bulk-generate?error=' + encodeURIComponent('Unknown profile.'));
+  const month = req.body.month || '';
+  const sourceEntity = schema.entities[profile.sourceTable];
+  const targetEntity = schema.entities[profile.targetTable];
+  if (!sourceEntity || !targetEntity) return res.redirect('/admin/bulk-generate?error=' + encodeURIComponent('Source or target table no longer exists.'));
+
+  const db = require('../db');
+  let sourceRows = db.getAll(profile.sourceTable).filter(r => !r.__deletedAt);
+
+  // Apply source filter (formula)
+  if (profile.sourceFilter && profile.sourceFilter.trim()) {
+    sourceRows = sourceRows.filter(r => {
+      try { return schemaLib.evalFormula(profile.sourceFilter, schema, sourceEntity, r, {}, 0); }
+      catch (e) { return false; }
+    });
+  }
+
+  // Sort by sourceSort field
+  if (profile.sourceSort && sourceEntity.fields.some(f => f.name === profile.sourceSort)) {
+    sourceRows.sort((a, b) => {
+      const va = a[profile.sourceSort], vb = b[profile.sourceSort];
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return va < vb ? -1 : va > vb ? 1 : 0;
+    });
+  }
+
+  // Dedup: skip source rows that already have a target record for this month
+  let existingTargets = [];
+  if (profile.dedupField && profile.dedupSourceField && month) {
+    existingTargets = db.getAll(profile.targetTable).filter(r => !r.__deletedAt && r[profile.monthField] === month);
+  }
+
+  let created = 0, skipped = 0;
+  sourceRows.forEach(srcRow => {
+    // Dedup check
+    if (profile.dedupField && profile.dedupSourceField && month) {
+      const srcVal = String(srcRow[profile.dedupSourceField] || '');
+      if (existingTargets.some(t => String(t[profile.dedupField] || '') === srcVal)) { skipped++; return; }
+    }
+
+    // Build the target record using the FULL record creation pipeline —
+    // not just the mapped fields. Start with an empty record (every field
+    // initialised to its default), apply field defaults, overlay the
+    // profile's field mappings, then assign auto-PK + series fields.
+    // This matches exactly what the normal form POST does, so the
+    // generated records have proper row IDs, series numbers, defaults,
+    // and complete field structure — not just the handful of mapped fields.
+    const newRecord = {};
+    targetEntity.fields.forEach(f => {
+      if (f.type === 'spacer' || f.type === 'section') return;
+      newRecord[f.name] = '';
+    });
+    schemaLib.applyFieldDefaults(schema, targetEntity, newRecord);
+
+    // Overlay the month field
+    if (profile.monthField && month) newRecord[profile.monthField] = month;
+
+    // Overlay the field mappings from the source row
+    (profile.fieldMappings || []).forEach(m => {
+      if (srcRow.hasOwnProperty(m.value)) {
+        newRecord[m.targetField] = srcRow[m.value];
+      } else {
+        newRecord[m.targetField] = m.value;
+      }
+    });
+
+    // Auto-PK (if the target table uses an auto-numbered primary key)
+    const pkField = targetEntity.fields.find(f => f.key);
+    if (pkField && pkField.auto) newRecord[targetEntity.pk] = db.nextAutoId(profile.targetTable, targetEntity.pk);
+
+    // Series fields (auto-numbered sequences like bill numbers)
+    schemaLib.assignSeriesFields(schema, targetEntity, newRecord);
+
+    db.insert(profile.targetTable, newRecord);
+    created++;
+  });
+
+  res.redirect('/admin/bulk-generate?notice=' + encodeURIComponent(created + ' record(s) created, ' + skipped + ' skipped (already exist).'));
+});

@@ -212,7 +212,7 @@ module.exports = {
       auditEnabled: false,
       fields: [
         { name: 'PAY_Name', label: 'Payee Name', type: 'text', required: true, key: true, inList: true },
-        { name: 'PAY_Method', label: 'Payment Method', type: 'picklist', options: 'UPI ID, Bank Account', required: true, inList: true },
+        { name: 'PAY_Method', label: 'Payment Method', type: 'picklist', picklistSource: 'custom', picklistValues: [{ key: 'upi-id', label: 'UPI ID', active: true }, { key: 'bank-account', label: 'Bank Account', active: true }], required: true, inList: true },
         { name: 'PAY_UPI_ID', label: 'UPI ID', type: 'text', inList: true },
         { name: 'PAY_AccountNum', label: 'Account Number', type: 'text', inList: false },
         { name: 'PAY_IFSC', label: 'IFSC', type: 'text', inList: false },

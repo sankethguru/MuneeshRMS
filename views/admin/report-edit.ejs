@@ -57,13 +57,14 @@
     <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Columns (Detail Mode)</span></div>
     <p class="admin-help">Used when Group By below is left blank &mdash; one row per matching record, one column per row here. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder. Check "Total" to show a grand-total row summing that column &mdash; only allowed on Currency/Percent/Number-formatted columns.</p>
     <table class="list-table reorderable-form">
-      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Column Label</th><th>Format</th><th>Total</th><th></th></tr></thead>
+      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Column Label</th><th>Tag Key</th><th>Format</th><th>Total</th><th></th></tr></thead>
       <tbody id="columnsBody">
         <% cols.forEach(function(c){ %>
         <tr>
           <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
-          <td><input type="text" name="col_expr[]" value="<%= c.expr || '' %>" style="width:100%" placeholder="e.g. tenants.T_Client_Name"></td>
+          <td><input type="text" name="col_expr[]" value="<%= c.expr || '' %>" style="width:100%" placeholder="e.g. tenants.T_Name"></td>
           <td><input type="text" name="col_label[]" value="<%= c.label || '' %>" style="width:100%" placeholder="defaults to expression"></td>
+          <td><input type="text" name="col_tagkey[]" value="<%= c.tagKey || '' %>" style="width:100%" placeholder="optional, e.g. InvNo"></td>
           <td>
             <select name="col_format[]">
               <% formatOptions.forEach(function(f){ %><option value="<%= f %>" <%= c.format === f ? 'selected' : '' %>><%= f %></option><% }); %>
@@ -78,6 +79,14 @@
         <% }); %>
       </tbody>
     </table>
+    <p class="admin-help">
+      <strong>Tag Key</strong> (optional): a fixed, stable name for this column's merge tag in a PDF template
+      (e.g. <code>{{InvNo}}</code>) &mdash; set once, it never changes even if you later rename the Column Label.
+      Leave blank and a template tag gets derived from the Label automatically instead (stripped down to
+      letters/digits/underscore) &mdash; convenient, but that derived tag silently changes if you rename the
+      Label later, which can leave a PDF template quietly showing blanks where data used to appear. Worth setting
+      explicitly on any column a PDF template will actually reference.
+    </p>
     <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('columnsBody')">+ Add Row</button></p>
 
     <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Group By &amp; Aggregates (Grouped Mode)</span></div>
@@ -85,7 +94,7 @@
     <div class="field-grid">
       <div class="field-row">
         <label class="field-label">Group By</label>
-        <div class="field-value"><input type="text" name="groupBy" value="<%= def ? def.groupBy : '' %>" style="width:100%" placeholder="e.g. tenants.T_Client_Name"></div>
+        <div class="field-value"><input type="text" name="groupBy" value="<%= def ? def.groupBy : '' %>" style="width:100%" placeholder="e.g. tenants.T_Name"></div>
       </div>
       <div class="field-row">
         <label class="field-label">Group Column Label</label>
@@ -93,7 +102,7 @@
       </div>
     </div>
     <table class="list-table reorderable-form">
-      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Function</th><th>Column Label</th><th>Format</th><th>Total</th><th></th></tr></thead>
+      <thead><tr><th style="width:32px"></th><th>Expression *</th><th>Function</th><th>Column Label</th><th>Tag Key</th><th>Format</th><th>Total</th><th></th></tr></thead>
       <tbody id="aggregatesBody">
         <% aggs.forEach(function(a){ %>
         <tr>
@@ -105,6 +114,7 @@
             </select>
           </td>
           <td><input type="text" name="agg_label[]" value="<%= a.label || '' %>" style="width:100%" placeholder="defaults to Fn(expr)"></td>
+          <td><input type="text" name="agg_tagkey[]" value="<%= a.tagKey || '' %>" style="width:100%" placeholder="optional"></td>
           <td>
             <select name="agg_format[]">
               <% formatOptions.forEach(function(f){ %><option value="<%= f %>" <%= a.format === f ? 'selected' : '' %>><%= f %></option><% }); %>
@@ -150,7 +160,7 @@
               <% }); %>
             </select>
           </td>
-          <td><input type="text" name="param_anchorresolver[]" value="<%= p.anchorResolver || '' %>" style="width:100%" placeholder="e.g. tenants.T_GroupRoot = ANCHOR.VALUE AND tenants.T_Is_Current = true"></td>
+          <td><input type="text" name="param_anchorresolver[]" value="<%= p.anchorResolver || '' %>" style="width:100%" placeholder="e.g. tenants.T_GroupRoot = ANCHOR.VALUE AND tenants.T_IsCurrent = true"></td>
           <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)" title="Remove this row">&times;</button></td>
         </tr>
         <% }); %>

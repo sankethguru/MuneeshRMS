@@ -1,0 +1,85 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<div class="applet-shell" style="max-width:640px;">
+  <div class="applet-titlebar">
+    <span class="applet-title">Add Projection Row — FY <%= projection.TJ_FY %></span>
+  </div>
+
+  <form class="detail-form" method="POST" action="/tax-projections/<%= projection.TJ_RowID %>/add-row" style="padding:12px;">
+    <div class="field-row">
+      <label class="field-label">Tenant (optional)</label>
+      <div class="field-value">
+        <select id="tenantPicker">
+          <option value="">— hypothetical / not linked —</option>
+          <% tenants.forEach(function(t){ %>
+            <option value="<%= t.code %>"><%= t.label %></option>
+          <% }); %>
+        </select>
+        <p class="admin-hint">Picking a tenant auto-fills the fields below from their current record — everything stays directly editable afterward.</p>
+      </div>
+    </div>
+    <input type="hidden" name="TJR_Tenant" id="TJR_Tenant">
+
+    <div class="field-row">
+      <label class="field-label">Prop Type</label>
+      <div class="field-value">
+        <select name="TJR_PropType" id="TJR_PropType">
+          <option value="Building">Building</option>
+          <option value="Land">Land</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label class="field-label">Label *</label>
+      <div class="field-value"><input type="text" name="TJR_Label" id="TJR_Label" required></div>
+    </div>
+
+    <div class="field-row">
+      <label class="field-label">Rental (₹/month) *</label>
+      <div class="field-value"><input type="number" step="0.01" name="TJR_Rental" id="TJR_Rental" required></div>
+    </div>
+
+    <div class="field-row">
+      <label class="field-label">TDS Debitor</label>
+      <div class="field-value"><input type="checkbox" name="TJR_TDSDebitor" id="TJR_TDSDebitor"></div>
+    </div>
+
+    <div class="field-row">
+      <label class="field-label">TDS %</label>
+      <div class="field-value"><input type="number" step="0.0001" name="TJR_TDSPercent" id="TJR_TDSPercent" value="0.10"></div>
+    </div>
+
+    <div class="field-row">
+      <label class="field-label">Months *</label>
+      <div class="field-value">
+        <input type="number" step="1" min="0" max="12" name="TJR_Months" id="TJR_Months" required value="12">
+        <p class="admin-hint">Auto-suggested when a tenant is picked, from their own tenancy dates — a whole-month approximation, always yours to correct.</p>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Add Row</button>
+      <a class="btn" href="/tax-projections/<%= projection.TJ_RowID %>">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+  var TENANTS = <%- JSON.stringify(tenants) %>;
+  document.getElementById('tenantPicker').addEventListener('change', function () {
+    var code = this.value;
+    document.getElementById('TJR_Tenant').value = code;
+    if (!code) return;
+    var t = TENANTS.find(function (x) { return x.code === code; });
+    if (!t) return;
+    document.getElementById('TJR_PropType').value = t.propType;
+    document.getElementById('TJR_Label').value = t.label;
+    document.getElementById('TJR_Rental').value = t.rental;
+    document.getElementById('TJR_TDSDebitor').checked = t.tdsDebitor;
+    document.getElementById('TJR_Months').value = t.months;
+  });
+</script>
+
+<%- include('partials/foot') %>

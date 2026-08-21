@@ -1,0 +1,96 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'data-health' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Data Health &mdash; <%= issues.total === 0 ? 'no issues found' : issues.total + ' issue(s) found' %></span>
+  </div>
+  <div class="applet-body" style="padding: 12px 14px;">
+      <p class="admin-blurb">
+        Diagnostics over the entire data store. Everything here is a real problem the normal screens
+        can hide: rollups and fk-hops through a trashed parent already render blank (as they should),
+        but you still want to see they're happening. Dangling fks (pointing at nothing that exists,
+        not even in the trash) look identical on the surface but have nothing to restore. Duplicate
+        <code>T_IsCurrent</code> flags silently double rent in rollups. Orphaned field data lingers
+        after a field is removed from the schema and would resurface if you ever recreate a field
+        of the same name. All lists show ACTIVE records only.
+      </p>
+
+      <% if (issues.total === 0) { %>
+        <p style="padding: 16px 0;"><b>All clean.</b> No trashed-parent references, no dangling fks, no duplicate current tenants, no orphaned field data.</p>
+      <% } %>
+
+      <% if (issues.trashedParents.length > 0) { %>
+        <h3>Trashed parents referenced by active records (<%= issues.trashedParents.length %>)</h3>
+        <p class="admin-blurb">The parent is in the Trash but the child is still live and pointing at it. Either restore the parent, or repoint / trash the child.</p>
+        <table class="list-table">
+          <thead><tr><th>Child</th><th>Child Field</th><th>Trashed Parent</th><th>Actions</th></tr></thead>
+          <tbody>
+            <% issues.trashedParents.slice(0, 100).forEach(function (r) { %>
+              <tr>
+                <td><a href="/<%= r.childEntity %>/<%= encodeURIComponent(r.childId) %>"><%= r.childEntity %> #<%= r.childId %></a></td>
+                <td><%= r.fkField %></td>
+                <td><a href="/admin/<%= r.refEntity %>/trash"><%= r.refEntity %> #<%= r.parentId %></a></td>
+                <td><a href="/admin/<%= r.refEntity %>/trash">Trash view</a></td>
+              </tr>
+            <% }); %>
+            <% if (issues.trashedParents.length > 100) { %><tr><td colspan="4">&hellip; and <%= issues.trashedParents.length - 100 %> more</td></tr><% } %>
+          </tbody>
+        </table>
+      <% } %>
+
+      <% if (issues.danglingFks.length > 0) { %>
+        <h3>Dangling fk values (<%= issues.danglingFks.length %>)</h3>
+        <p class="admin-blurb">The fk is set to a value that doesn't exist anywhere, not even in the Trash. Nothing to restore &mdash; edit the child to fix or clear the reference.</p>
+        <table class="list-table">
+          <thead><tr><th>Child</th><th>Field</th><th>Bad Reference</th></tr></thead>
+          <tbody>
+            <% issues.danglingFks.slice(0, 100).forEach(function (r) { %>
+              <tr>
+                <td><a href="/<%= r.childEntity %>/<%= encodeURIComponent(r.childId) %>"><%= r.childEntity %> #<%= r.childId %></a></td>
+                <td><%= r.fkField %></td>
+                <td><%= r.refEntity %> #<%= r.parentId %></td>
+              </tr>
+            <% }); %>
+            <% if (issues.danglingFks.length > 100) { %><tr><td colspan="3">&hellip; and <%= issues.danglingFks.length - 100 %> more</td></tr><% } %>
+          </tbody>
+        </table>
+      <% } %>
+
+      <% if (issues.duplicateCurrentTenants.length > 0) { %>
+        <h3>Tenant groups with duplicate <code>T_IsCurrent</code> (<%= issues.duplicateCurrentTenants.length %>)</h3>
+        <p class="admin-blurb">Two or more revisions in the same group are both flagged current. Reports and rollups will DOUBLE-COUNT rent from this group. Edit all but the truly current revision and uncheck <code>T_IsCurrent</code>.</p>
+        <table class="list-table">
+          <thead><tr><th>Group Root</th><th>Current Revisions</th></tr></thead>
+          <tbody>
+            <% issues.duplicateCurrentTenants.forEach(function (r) { %>
+              <tr>
+                <td><a href="/tenants/<%= encodeURIComponent(r.groupRoot) %>"><%= r.groupRoot %></a></td>
+                <td><% r.codes.forEach(function(c, i) { %><% if (i) { %>, <% } %><a href="/tenants/<%= encodeURIComponent(c) %>"><%= c %></a><% }); %></td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      <% } %>
+
+      <% if (issues.orphanedFieldData.length > 0) { %>
+        <h3>Orphaned field data (<%= issues.orphanedFieldData.length %>)</h3>
+        <p class="admin-blurb">Row data carrying a property whose field no longer exists in the schema. Invisible in the UI, but would resurface if you ever create a new field of the same name (via Admin or CSV import). Reserved internals (<code>__deletedAt</code>, <code>__deletedBy</code>, <code>__importBatch</code>) are correctly excluded.</p>
+        <table class="list-table">
+          <thead><tr><th>Table</th><th>Property</th><th>Sample IDs</th></tr></thead>
+          <tbody>
+            <% issues.orphanedFieldData.forEach(function (r) { %>
+              <tr>
+                <td><%= r.entityKey %></td>
+                <td><code><%= r.fieldName %></code></td>
+                <td><%= r.sampleIds.join(', ') %><%= r.sampleIds.length >= 3 ? ', ...' : '' %></td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      <% } %>
+    </div>
+  </div>
+
+<%- include('../partials/foot') %>

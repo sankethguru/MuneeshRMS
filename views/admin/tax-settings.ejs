@@ -1,0 +1,78 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'tax-settings' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Tax Settings</span>
+  </div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <p class="admin-help">
+    <strong>Tax only works with tables named exactly <code>landlords</code>, <code>tenants</code>, and
+    <code>invoices</code></strong> &mdash; this isn't configurable, the same boundary PayQR draws around
+    <code>payees</code>/<code>payments</code>. Unlike PayQR's tables, these aren't owned by this module &mdash;
+    they're the core tables the whole app is built around, so there's no "recreate from scratch" guide here.
+    <strong>Which field</strong> on those tables plays each role below is what's actually configurable.
+  </p>
+
+  <% if (missingTables.length > 0) { %>
+    <div class="format-warning">
+      <span class="warn-icon">&#9888;</span>
+      <span class="warn-text">
+        Tax needs all three tables to exist. Missing: <% missingTables.forEach(function(k, i){ %><strong><%= k %></strong><%= i < missingTables.length - 1 ? ', ' : '' %><% }); %>.
+        Nothing below can be mapped until <%= missingTables.length > 1 ? 'these exist' : 'it exists' %>.
+      </span>
+    </div>
+  <% } else { %>
+
+    <% var isComplete = Object.keys(roleFields).every(function(k){ return roleFields[k].optional || settings[k]; }); %>
+    <% if (!isComplete) { %>
+      <div class="format-warning">
+        <span class="warn-icon">&#9888;</span>
+        <span class="warn-text">
+          Tax is <strong>not fully configured</strong>. Until every required field below is mapped, every Tax
+          screen shows a clear "not configured" message rather than computing against a missing or wrong field.
+        </span>
+      </div>
+    <% } %>
+
+    <p class="admin-help">
+      A few things are figured out automatically and aren't listed here: which field on Invoices links to
+      Landlords, and which links to Tenants — both derived from the schema's own fk relationships, the same way
+      PayQR derives its own payee-link field. Everything below needs to be set explicitly, since there's no way
+      to guess "which field is the taxable rent" from field type alone.
+    </p>
+
+    <form class="detail-form" method="POST" action="/admin/tax-settings">
+      <div class="field-grid">
+        <% Object.keys(roleFields).forEach(function(key){ var role = roleFields[key]; %>
+        <div class="field-row">
+          <label class="field-label"><%= role.label %><%= role.optional ? ' (optional)' : ' *' %></label>
+          <div class="field-value">
+            <select name="<%= key %>">
+              <option value="">&mdash; not set &mdash;</option>
+              <% role.options.forEach(function(f){ %>
+                <option value="<%= f.name %>" <%= settings[key] === f.name ? 'selected' : '' %>><%= f.label %> (<%= f.name %>)</option>
+              <% }); %>
+            </select>
+            <% if (key === 'landlordGroupField') { %>
+              <p class="admin-hint">A self-referential link on Landlords tying multiple GST registrations of the same person/PAN together. Leave unset if no landlord here is ever registered in more than one state — each landlord is then simply treated as its own group.</p>
+            <% } else if (role.optional) { %>
+              <p class="admin-hint">Shown on the printable Landlord Annexure only &mdash; leaving this unset just omits that one column, the rest of the computation is unaffected.</p>
+            <% } %>
+            <% if (role.options.length === 0) { %>
+              <p class="admin-hint">No <%= role.types.join(' or ') %> field exists on <%= role.entity %> yet &mdash; add one under Admin &rarr; Tables &rarr; Fields first.</p>
+            <% } %>
+          </div>
+        </div>
+        <% }); %>
+      </div>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">Save Settings</button></div>
+    </form>
+  <% } %>
+</div>
+
+<%- include('../partials/foot') %>

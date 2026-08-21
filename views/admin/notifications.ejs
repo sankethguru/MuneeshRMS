@@ -1,0 +1,320 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'notifications' }) %>
+
+<div class="applet-shell notifications-page">
+  <div class="applet-titlebar">
+    <span class="applet-title">Telegram Notifications</span>
+  </div>
+
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+
+  <p class="admin-help">
+    Sends alerts to Telegram. Nothing here is on by default &mdash; every event source below starts at
+    <strong>Off</strong>, including after an upgrade that adds new ones, so the app never starts messaging
+    your family by surprise. Alerts are computed from exactly the same logic the Home screen widgets use,
+    so a notification can never disagree with what the dashboard shows.
+  </p>
+
+  <!-- ---------- Bot token ---------- -->
+  <h3 class="admin-h3">1. Bot token</h3>
+  <p class="admin-help">
+    Create a bot by messaging <code>@BotFather</code> on Telegram and sending <code>/newbot</code>. It replies
+    with a token. <strong>The token is stored outside <code>schema.json</code> and is never included in a backup
+    archive</strong> &mdash; backups get downloaded and emailed, and a leaked token lets anyone impersonate your bot.
+  </p>
+
+  <% if (tokenSource === 'env') { %>
+    <div class="format-warning">
+      <span class="warn-icon">&#9888;</span>
+      <span class="warn-text">
+        The token is supplied by the <code>TELEGRAM_BOT_TOKEN</code> environment variable
+        (currently <code><%= maskedToken %></code>). That takes priority and <strong>cannot be changed from
+        this page</strong> &mdash; edit your compose file or service definition instead. This is deliberate:
+        letting the browser shadow a token the process owner set would make this page lie about what's in use.
+      </span>
+    </div>
+  <% } else { %>
+    <form method="post" action="/admin/notifications/token" class="admin-form">
+      <label>Bot token
+        <input type="password" name="token" autocomplete="off" placeholder="<%= hasToken ? 'Stored — leave blank to keep' : '123456789:AA...' %>">
+      </label>
+      <button class="btn" type="submit">Save token</button>
+      <% if (hasToken) { %>
+        <span class="admin-hint">Currently stored: <code><%= maskedToken %></code></span>
+        <button class="btn btn-danger" type="submit" name="clear" value="1"
+                onclick="return confirm('Remove the stored bot token? Notifications will stop until a new one is saved.')">Remove</button>
+      <% } %>
+    </form>
+  <% } %>
+
+  <% if (hasToken) { %>
+    <form method="post" action="/admin/notifications/check" style="margin-top:8px; padding:0 16px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <button class="btn" type="submit">Check connection</button>
+      <span class="admin-hint">Asks Telegram who this bot is &mdash; confirms the token without needing a chat ID.</span>
+    </form>
+  <% } %>
+
+  <!-- ---------- Recipients ---------- -->
+  <h3 class="admin-h3">2. Recipients</h3>
+  <p class="admin-help">
+    To find a chat ID: add the bot to the group (or message it directly), then open
+    <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code> in a browser and read <code>chat.id</code>.
+    Group IDs are negative numbers.
+  </p>
+
+  <h4 class="admin-h4">Group chats</h4>
+  <p class="admin-help">
+    A group chat has no logged-in user, so it needs an identity to borrow permissions from.
+    <strong>Leaving &ldquo;Use permissions of&rdquo; blank means everyone in that chat sees every enabled alert</strong>,
+    with no permission filtering &mdash; fine for a private family group, but it should be a choice, not an accident.
+  </p>
+  <table class="list-table">
+    <thead><tr><th>Label</th><th>Chat ID</th><th>Use permissions of</th><th></th></tr></thead>
+    <tbody>
+      <% (settings.groupChats || []).forEach(function (g) { %>
+        <tr>
+          <td><%= g.label || '' %></td>
+          <td><code><%= g.chatId %></code></td>
+          <td>
+            <% if (g.asUser) { %><%= g.asUser %><% } else { %>
+              <span class="warn-text"><strong>Everything</strong> (unfiltered)</span>
+            <% } %>
+          </td>
+          <td>
+            <form method="post" action="/admin/notifications/group/<%= encodeURIComponent(g.id) %>/delete" style="display:inline">
+              <button class="btn btn-small btn-danger" type="submit"
+                      onclick="return confirm('Remove this group chat?')">Remove</button>
+            </form>
+            <form method="post" action="/admin/notifications/test" style="display:inline">
+              <input type="hidden" name="chatId" value="<%= g.chatId %>">
+              <button class="btn btn-small" type="submit">Send test</button>
+            </form>
+          </td>
+        </tr>
+      <% }); %>
+      <% if ((settings.groupChats || []).length === 0) { %>
+        <tr><td colspan="4" class="empty-row">No group chats configured.</td></tr>
+      <% } %>
+      <tr>
+        <td><input type="text" name="label" form="add-group-chat-form" placeholder="Family"></td>
+        <td><input type="text" name="chatId" form="add-group-chat-form" required placeholder="-1001234567890"></td>
+        <td>
+          <select name="asUser" form="add-group-chat-form">
+            <option value="">— everything (unfiltered) —</option>
+            <% users.forEach(function (u) { %><option value="<%= u.username %>"><%= u.username %></option><% }); %>
+          </select>
+        </td>
+        <td><button class="btn btn-small" type="submit" form="add-group-chat-form">Add</button></td>
+      </tr>
+    </tbody>
+  </table>
+  <!-- Inputs live as real cells in the table above (so they share its
+       column widths and actually line up under Label/Chat ID/Use
+       permissions of) but a <form> can't wrap a <tr> directly — this
+       empty form is what they submit to, via the form="..." attribute
+       on each field. -->
+  <form id="add-group-chat-form" method="post" action="/admin/notifications/group"></form>
+
+  <h4 class="admin-h4">Per-user chats</h4>
+  <p class="admin-help">
+    A direct chat with one app user. These <strong>are</strong> permission-filtered: a user who can't read
+    invoices never receives rent alerts, exactly as they'd see nothing on the Home screen.
+  </p>
+  <table class="list-table">
+    <thead><tr><th>User</th><th>Chat ID</th><th></th></tr></thead>
+    <tbody>
+      <% users.forEach(function (u) { %>
+        <tr>
+          <td><%= u.username %><%= u.isAdmin ? ' (admin)' : '' %></td>
+          <td>
+            <form method="post" action="/admin/notifications/user-chat" class="inline-form">
+              <input type="hidden" name="username" value="<%= u.username %>">
+              <input type="text" name="chatId" value="<%= (settings.userChats || {})[u.username] || '' %>" placeholder="not set">
+              <button class="btn btn-small" type="submit">Save</button>
+            </form>
+          </td>
+          <td>
+            <% if ((settings.userChats || {})[u.username]) { %>
+              <form method="post" action="/admin/notifications/test" style="display:inline">
+                <input type="hidden" name="chatId" value="<%= settings.userChats[u.username] %>">
+                <button class="btn btn-small" type="submit">Send test</button>
+              </form>
+            <% } %>
+          </td>
+        </tr>
+      <% }); %>
+    </tbody>
+  </table>
+
+  <!-- ---------- Schedule + sources ---------- -->
+  <form method="post" action="/admin/notifications/settings">
+    <h3 class="admin-h3">3. Schedule</h3>
+    <div class="admin-form">
+      <label class="checkbox-field">
+        <span class="checkbox-field-spacer" aria-hidden="true">&nbsp;</span>
+        <span class="checkbox-field-row">
+          <input type="checkbox" name="enabled" value="1" <%= settings.enabled ? 'checked' : '' %>>
+          Notifications enabled
+        </span>
+      </label>
+      <label>Daily digest hour
+        <select name="digestHour">
+          <% for (var h = 0; h < 24; h++) { %>
+            <option value="<%= h %>" <%= Number(settings.digestHour) === h ? 'selected' : '' %>><%= String(h).padStart(2,'0') %>:00</option>
+          <% } %>
+        </select>
+      </label>
+      <label>Quiet hours from
+        <select name="quietStartHour">
+          <% for (var h2 = 0; h2 < 24; h2++) { %>
+            <option value="<%= h2 %>" <%= Number(settings.quietStartHour) === h2 ? 'selected' : '' %>><%= String(h2).padStart(2,'0') %>:00</option>
+          <% } %>
+        </select>
+      </label>
+      <label>to
+        <select name="quietEndHour">
+          <% for (var h3 = 0; h3 < 24; h3++) { %>
+            <option value="<%= h3 %>" <%= Number(settings.quietEndHour) === h3 ? 'selected' : '' %>><%= String(h3).padStart(2,'0') %>:00</option>
+          <% } %>
+        </select>
+      </label>
+      <label>Keep delivery log for
+        <input type="number" name="retentionDays" min="1" max="3650" value="<%= settings.retentionDays %>"> days
+      </label>
+    </div>
+    <p class="admin-help">
+      Quiet hours suppress <em>immediate</em> alerts only &mdash; a suppressed alert is delayed, not dropped, and
+      goes out on the first check after quiet hours end. The daily digest still sends at its configured hour,
+      because you picked that hour on purpose.
+      <% if (digestInQuiet) { %>
+        <br><strong class="warn-text">Note: your digest hour falls inside quiet hours. That's allowed &mdash; the digest
+        will still send &mdash; but it may not be what you intended.</strong>
+      <% } %>
+      Checks run every <%= tickMinutes %> minutes, so &ldquo;immediate&rdquo; means <em>within <%= tickMinutes %> minutes</em>.
+    </p>
+
+    <h3 class="admin-h3">4. What to notify about</h3>
+    <table class="list-table">
+      <thead><tr><th>Event source</th><th>Delivery</th><th>Status right now</th></tr></thead>
+      <tbody>
+        <% Object.keys(sources).forEach(function (key) {
+             var src = sources[key];
+             var cfg = (settings.sources || {})[key] || { mode: 'off' };
+             var st = sourceStatus[key] || {}; %>
+          <tr>
+            <td>
+              <strong><%= src.label %></strong>
+              <div class="admin-hint"><%= src.description %></div>
+            </td>
+            <td>
+              <select name="mode__<%= key %>">
+                <% modes.forEach(function (m) { %>
+                  <option value="<%= m %>" <%= cfg.mode === m ? 'selected' : '' %>><%= modeLabels[m] %></option>
+                <% }); %>
+              </select>
+            </td>
+            <td>
+              <% if (!st.available) { %>
+                <span class="admin-hint">unavailable<%= st.reason ? ' — ' + st.reason : '' %></span>
+              <% } else { %>
+                <%= st.count %> item<%= st.count === 1 ? '' : 's' %> outstanding
+              <% } %>
+            </td>
+          </tr>
+        <% }); %>
+      </tbody>
+    </table>
+
+    <div style="margin-top:12px; padding:0 16px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <button class="btn btn-primary" type="submit">Save settings</button>
+      <button class="btn" type="submit" formaction="/admin/notifications/test-selection">Save &amp; send me a preview</button>
+      <% if (!(settings.userChats || {})[currentUser.username]) { %>
+        <span class="admin-hint">Set your own chat ID under Per-user chats above first, so this has somewhere to send to.</span>
+      <% } %>
+    </div>
+  </form>
+
+  <!-- ---------- Preview ---------- -->
+  <h3 class="admin-h3">5. Preview</h3>
+  <p class="admin-help">
+    Exactly what would be sent right now, per recipient, without sending or logging anything.
+  </p>
+  <% if (preview.length === 0) { %>
+    <p class="empty-row">No recipients configured yet.</p>
+  <% } %>
+  <% preview.forEach(function (p) { %>
+    <div class="preview-block">
+      <h4 class="admin-h4">
+        <%= p.recipient.label %> (<%= p.recipient.kind %>, chat <code><%= p.recipient.chatId %></code>)
+        <% if (p.recipient.unfiltered) { %><span class="warn-text">— unfiltered</span><% } %>
+      </h4>
+      <% if (p.digestPreview) { %>
+        <pre class="preview-pre"><%= p.digestPreview.replace(/<[^>]+>/g, '') %></pre>
+      <% } else { %>
+        <p class="admin-hint">Nothing outstanding &mdash; no digest would be sent.</p>
+      <% } %>
+      <p class="admin-hint"><%= p.immediateCount %> item(s) configured for immediate alerts
+        (already-alerted items are not re-sent).</p>
+    </div>
+  <% }); %>
+
+  <p class="admin-help" style="margin-top:14px">
+    <a href="/notification_log">View delivery log</a> &mdash; every send, success or failure, with the reason.
+  </p>
+
+  <!-- ---------- Email settings (its own card, sibling of Telegram) ---------- -->
+</div>
+
+<div class="applet-shell notifications-page">
+  <div class="applet-titlebar"><span class="applet-title">Email Settings</span></div>
+  <p class="admin-help">
+    Outbound email over SMTP &mdash; used both for the per-record email templates (Admin &rarr; Templates) and,
+    when enabled below, as a delivery channel for the notification sources above. The password is stored
+    separately from the schema and never included in a backup. Deliverability (SPF/DKIM/from-domain) is
+    configured with your mail provider, not here.
+  </p>
+
+  <form method="POST" action="/admin/email-settings" class="admin-form">
+    <label>SMTP Host <input type="text" name="host" value="<%= emailSettings.host || '' %>" placeholder="smtp.gmail.com"></label>
+    <label>Port <input type="number" name="port" value="<%= emailSettings.port || 587 %>" style="width:80px; min-width:0"></label>
+    <label>Username <input type="text" name="username" value="<%= emailSettings.username || '' %>" placeholder="often your full email address"></label>
+    <label>Password
+      <% if (emailPasswordSource === 'env') { %>
+        <input type="text" disabled value="set via SMTP_PASSWORD env var">
+      <% } else { %>
+        <input type="password" name="password" placeholder="<%= emailHasPassword ? 'stored \u2014 leave blank to keep' : 'enter SMTP password' %>">
+      <% } %>
+    </label>
+    <label>From Name <input type="text" name="fromName" value="<%= emailSettings.fromName || '' %>" placeholder="Muneesh Legacy"></label>
+    <label>From Address <input type="text" name="fromAddress" value="<%= emailSettings.fromAddress || '' %>" placeholder="billing@yourdomain.com"></label>
+    <label>Reply-To <input type="text" name="replyTo" value="<%= emailSettings.replyTo || '' %>" placeholder="optional"></label>
+    <label>Notify email to <input type="text" name="notifyEmailTo" value="<%= emailSettings.notifyEmailTo || '' %>" placeholder="you@example.com"></label>
+    <label>Log retention (days) <input type="number" name="logRetentionDays" value="<%= emailSettings.logRetentionDays || 90 %>" min="1" style="width:80px; min-width:0"></label>
+    <label class="checkbox-field">
+      <span class="checkbox-field-spacer" aria-hidden="true">&nbsp;</span>
+      <span class="checkbox-field-row"><input type="checkbox" name="secure" <%= emailSettings.secure ? 'checked' : '' %>> Implicit TLS (port 465)</span>
+    </label>
+    <label class="checkbox-field">
+      <span class="checkbox-field-spacer" aria-hidden="true">&nbsp;</span>
+      <span class="checkbox-field-row"><input type="checkbox" name="notifyChannel" <%= emailSettings.notifyChannel ? 'checked' : '' %>> Email the notification sources too</span>
+    </label>
+    <button class="btn btn-primary" type="submit">Save email settings</button>
+  </form>
+
+  <form method="POST" action="/admin/email-settings/test" class="admin-form" style="margin-top:2px">
+    <label>Send a test email to <input type="text" name="testTo" placeholder="you@example.com"></label>
+    <button class="btn" type="submit" <%= emailConfigured ? '' : 'disabled' %>>Send test email</button>
+    <% if (!emailConfigured) { %><span class="admin-hint">Set SMTP host + from-address first.</span><% } %>
+  </form>
+
+  <p class="admin-help" style="margin-top:10px">
+    <strong>Email templates</strong> (the emails you send from a record) live in
+    <a href="/admin/templates">Admin &rarr; Templates</a> as templates of kind <em>Email</em>, bound to a table.
+    Delivery history is in the <a href="/email_log">Email Log</a>.
+    <% if (emailTemplates && emailTemplates.length) { %> Current: <%= emailTemplates.map(function(t){ return t.label; }).join(', ') %>.<% } %>
+  </p>
+</div>
+
+<%- include('../partials/foot') %>

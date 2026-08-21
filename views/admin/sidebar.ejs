@@ -1,0 +1,132 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'sidebar' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Sidebar</span>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <p class="admin-help" style="padding:8px 12px;">
+    What shows in the left sidebar, grouped however makes sense to you, with an icon per item. Drag the &#9776;
+    handle to reorder groups or the items inside one. A group with nothing in it never shows up in the real
+    sidebar at all — no need to delete an empty one just to keep things tidy.
+  </p>
+
+  <div class="reorderable-list" data-reorder-url="/admin/sidebar/groups/reorder" style="padding:0 12px;">
+    <% groups.forEach(function(g){ %>
+      <div class="sidebar-group-editor" data-item-id="<%= g.key %>" style="border:1px solid var(--border-dark); margin-bottom:14px; background:var(--white);">
+        <div style="display:flex; align-items:center; gap:8px; padding:8px 10px; background:var(--panel-bg); border-bottom:1px solid var(--border-dark);">
+          <span class="drag-handle" style="cursor:grab; color:var(--ink-soft);" title="Drag to reorder groups">&#9776;</span>
+          <form method="POST" action="/admin/sidebar/groups/<%= g.key %>" style="display:flex; align-items:center; gap:10px; flex:1;">
+            <input type="text" name="label" value="<%= g.label %>" style="font-weight:600; flex:1; max-width:260px;">
+            <label style="font-size:12px; display:flex; align-items:center; gap:4px;">
+              <input type="checkbox" name="collapsedByDefault" <%= g.collapsedByDefault ? 'checked' : '' %>>
+              Collapsed by default
+            </label>
+            <button class="btn btn-mini" type="submit">Save</button>
+          </form>
+          <form method="POST" action="/admin/sidebar/groups/<%= g.key %>/delete" onsubmit="return confirm('Remove this group? Its items just become unlisted — nothing about the underlying tables is touched.');">
+            <button class="btn btn-mini btn-danger" type="submit">Remove Group</button>
+          </form>
+        </div>
+
+        <div class="reorderable-list" data-reorder-url="/admin/sidebar/groups/<%= g.key %>/items/reorder">
+          <% g.items.forEach(function(it, idx){ %>
+            <div data-item-id="<%= idx %>" style="display:flex; align-items:center; gap:10px; padding:6px 10px; border-bottom:1px solid #eee;">
+              <span class="drag-handle" style="cursor:grab; color:var(--ink-soft); font-size:13px;" title="Drag to reorder">&#9776;</span>
+              <form method="POST" action="/admin/sidebar/groups/<%= g.key %>/items/<%= idx %>" style="display:flex; align-items:center; gap:8px; flex:1;">
+                <span class="ml-icon-btn" tabindex="0" role="button" data-group="<%= g.key %>" data-idx="<%= idx %>" data-current="<%= it.icon %>"
+                      style="border:1px solid var(--border-dark); border-radius:3px; padding:4px 6px; cursor:pointer; display:inline-flex; color:var(--navy-2);"
+                      onclick="mlOpenIconPicker(this)" title="Change icon"><%- renderIcon(it.icon) %></span>
+                <input type="hidden" name="icon" value="<%= it.icon %>">
+                <input type="text" name="label" value="<%= it.label %>" style="flex:1; max-width:260px;">
+                <span style="font-size:11px; color:var(--ink-soft); font-family:monospace;"><%= it.path %></span>
+                <button class="btn btn-mini" type="submit">Save</button>
+              </form>
+              <form method="POST" action="/admin/sidebar/groups/<%= g.key %>/items/<%= idx %>/delete">
+                <button class="btn btn-mini btn-danger" type="submit" title="Remove from sidebar">&times;</button>
+              </form>
+            </div>
+          <% }); %>
+          <% if (g.items.length === 0) { %>
+            <p class="admin-help" style="padding:8px 10px; font-style:italic;">No items yet — add one below.</p>
+          <% } %>
+        </div>
+
+        <div style="padding:8px 10px; border-top:1px solid #eee;">
+          <form method="POST" action="/admin/sidebar/groups/<%= g.key %>/items" style="display:flex; align-items:center; gap:8px;" onsubmit="return mlSubmitAddItem(this)">
+            <select class="ml-add-item-select" style="flex:1; max-width:280px;">
+              <option value="">&mdash; add an item to this group &mdash;</option>
+              <% candidates.forEach(function(c){ %>
+                <option value="<%= c.path %>" data-label="<%= c.label %>" data-icon="<%= c.icon %>" data-entitykeys="<%= JSON.stringify(c.entityKeys) %>"><%= c.label %> (<%= c.path %>)</option>
+              <% }); %>
+            </select>
+            <input type="hidden" name="path"><input type="hidden" name="label"><input type="hidden" name="icon"><input type="hidden" name="entityKeys">
+            <button class="btn btn-mini" type="submit">+ Add</button>
+          </form>
+        </div>
+      </div>
+    <% }); %>
+  </div>
+
+  <div style="padding:8px 12px;">
+    <form method="POST" action="/admin/sidebar/groups" style="display:flex; align-items:center; gap:8px;">
+      <input type="text" name="label" placeholder="New group name" style="max-width:240px;" required>
+      <button class="btn btn-toolbar btn-mini" type="submit">+ Add Group</button>
+    </form>
+  </div>
+</div>
+
+<div id="mlIconPickerOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:100; align-items:center; justify-content:center;">
+  <div style="background:var(--white); border:1px solid var(--border-dark); border-radius:4px; padding:16px; width:360px; max-height:70vh; overflow-y:auto;">
+    <p class="admin-help" style="margin-top:0;">Choose an icon</p>
+    <div style="display:grid; grid-template-columns:repeat(6,1fr); gap:6px;">
+      <% iconKeys.forEach(function(key){ %>
+        <span class="ml-icon-choice" data-key="<%= key %>" onclick="mlPickIcon('<%= key %>')"
+              style="border:1px solid var(--border-dark); border-radius:3px; padding:8px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--navy-2);"
+              title="<%= key %>"><%- renderIcon(key, { size: 20 }) %></span>
+      <% }); %>
+    </div>
+    <div style="text-align:right; margin-top:12px;">
+      <button class="btn btn-mini" type="button" onclick="mlCloseIconPicker()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  var mlIconPickerTarget = null;
+  function mlOpenIconPicker(btn) {
+    mlIconPickerTarget = btn;
+    document.getElementById('mlIconPickerOverlay').style.display = 'flex';
+  }
+  function mlCloseIconPicker() {
+    document.getElementById('mlIconPickerOverlay').style.display = 'none';
+    mlIconPickerTarget = null;
+  }
+  function mlPickIcon(key) {
+    if (!mlIconPickerTarget) return;
+    var form = mlIconPickerTarget.closest('form');
+    form.querySelector('input[name="icon"]').value = key;
+    form.submit();
+  }
+  document.getElementById('mlIconPickerOverlay').addEventListener('click', function (e) {
+    if (e.target === this) mlCloseIconPicker();
+  });
+
+  function mlSubmitAddItem(form) {
+    var select = form.querySelector('.ml-add-item-select');
+    var opt = select.options[select.selectedIndex];
+    if (!select.value) return false;
+    form.querySelector('input[name="path"]').value = select.value;
+    form.querySelector('input[name="label"]').value = opt.getAttribute('data-label');
+    form.querySelector('input[name="icon"]').value = opt.getAttribute('data-icon');
+    form.querySelector('input[name="entityKeys"]').value = opt.getAttribute('data-entitykeys');
+    return true;
+  }
+</script>
+
+<%- include('../partials/foot') %>

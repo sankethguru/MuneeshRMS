@@ -1,0 +1,38 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Search Results<%= q ? ': "' + q + '"' : '' %></span>
+  </div>
+
+  <% if (!q) { %>
+    <p class="admin-help" style="padding:16px 20px;">Type something in the search box above to look across every screen you have access to.</p>
+  <% } else if (groups.length === 0) { %>
+    <p class="admin-help" style="padding:16px 20px;">No matches for "<%= q %>" in anything you have access to.</p>
+  <% } %>
+
+  <% groups.forEach(function(group){ %>
+    <div class="applet-titlebar applet-titlebar-child">
+      <span class="applet-title"><%= group.entity.label %> <span class="admin-hint">(<%= group.totalCount %> match<%= group.totalCount === 1 ? '' : 'es' %>)</span></span>
+    </div>
+    <div class="list-table-wrap">
+      <table class="list-table">
+        <tbody>
+          <% group.rows.forEach(function(r, i){ %>
+            <tr class="data-row <%= i % 2 === 0 ? 'row-even' : 'row-odd' %>" style="cursor:pointer;" onclick="location.href='/<%= group.entity.key %>/<%= encodeURIComponent(r[group.entity.pk]) %>'">
+              <td><a class="cell-link" href="/<%= group.entity.key %>/<%= encodeURIComponent(r[group.entity.pk]) %>"><%= display(group.entity, r) %></a></td>
+            </tr>
+          <% }); %>
+        </tbody>
+      </table>
+      <% if (group.hasMore) { %>
+        <p class="admin-help" style="padding:8px 12px;">
+          <a href="/<%= group.entity.key %>?q=<%= encodeURIComponent(q) %>">See all <%= group.totalCount %> matches in <%= group.entity.label %> &rarr;</a>
+        </p>
+      <% } %>
+    </div>
+  <% }); %>
+</div>
+
+<%- include('partials/foot') %>

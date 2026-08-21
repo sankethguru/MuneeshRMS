@@ -59,6 +59,37 @@
       <% if (applet.type === 'list') { %>
         <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Columns</span></div>
         <p class="admin-help">Which fields show, and in what order, when this applet renders as a list. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder.</p>
+      <% } else if (applet.type === 'detail') { %>
+        <% var dcols = (applet.detailFields || []).map(function(c){ return { name: c }; }).concat([{},{},{}]); %>
+        <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Detail Fields</span></div>
+        <p class="admin-help">Which fields show in the detail view. Leave empty to show all fields. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder.</p>
+        <table class="list-table reorderable-form">
+          <thead><tr><th style="width:32px"></th><th>Field</th><th></th></tr></thead>
+          <tbody id="detailFieldsBody">
+            <% dcols.forEach(function(c){ %>
+            <tr>
+              <td class="drag-handle" title="Drag to reorder">&#x2630;</td>
+              <td>
+                <select name="detailFields[]">
+                  <option value="">&mdash; field &mdash;</option>
+                  <option value="__spacer__" <%= c.name === '__spacer__' ? 'selected' : '' %>>&mdash;&mdash; Spacer &mdash;&mdash;</option>
+                  <option value="__section__" <%= c.name === '__section__' ? 'selected' : '' %>>&mdash;&mdash; Section Header &mdash;&mdash;</option>
+                  <% baseFields.forEach(function(f){ %>
+                    <option value="<%= f.name %>" <%= c.name === f.name ? 'selected' : '' %>><%= f.label %> (<%= f.name %>)</option>
+                  <% }); %>
+                </select>
+              </td>
+              <td><button class="btn btn-mini btn-danger" type="button" onclick="mlRemoveReportRow(this)" title="Remove this row">&times;</button></td>
+            </tr>
+            <% }); %>
+          </tbody>
+        </table>
+        <p class="admin-help"><button class="btn btn-mini" type="button" onclick="mlAddReportRow('detailFieldsBody')">+ Add Row</button></p>
+      <% } %>
+
+      <% if (applet.type === 'list') { %>
+        <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Columns</span></div>
+        <p class="admin-help">Which fields show, and in what order, when this applet renders as a list. Drag the <span class="drag-handle-hint">&#x2630;</span> handle to reorder.</p>
         <table class="list-table reorderable-form">
           <thead><tr><th style="width:32px"></th><th>Field</th><th></th></tr></thead>
           <tbody id="columnsBody">

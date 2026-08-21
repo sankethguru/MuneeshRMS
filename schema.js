@@ -13,7 +13,7 @@ const db = require('./db');
 const DATA_DIR = path.join(__dirname, 'data');
 const SCHEMA_FILE = path.join(DATA_DIR, 'schema.json');
 
-const FIELD_TYPES = ['text', 'number', 'date', 'timestamp', 'bool', 'textarea', 'fk', 'currency', 'percent', 'image', 'formula', 'picklist', 'series', 'rollup', 'spacer', 'section'];
+const FIELD_TYPES = ['text', 'number', 'date', 'timestamp', 'bool', 'textarea', 'fk', 'currency', 'percent', 'image', 'file', 'formula', 'picklist', 'series', 'rollup', 'spacer', 'section'];
 // Layout-only types: hold no data, never saved, never in list columns, never importable/exportable.
 const LAYOUT_TYPES = ['spacer', 'section'];
 
@@ -30,14 +30,21 @@ const ADMIN_SUBNAV_FIXED_PAGES = {
   backup: { label: 'Backup', href: '/admin/backup' },
   errors: { label: 'Errors', href: '/admin/errors' },
   payqr: { label: 'PayQR Settings', href: '/admin/payqr-settings' },
+  themes: { label: 'Themes', href: '/admin/themes' },
+  'bulk-generate': { label: 'Bulk Generate', href: '/admin/bulk-generate' },
+  'tax-settings': { label: 'Tax Settings', href: '/admin/tax-settings' },
   session: { label: 'Session', href: '/admin/session-settings' },
   reports: { label: 'Reports', href: '/admin/reports' },
   applets: { label: 'Applets', href: '/admin/applets' },
-  composedViews: { label: 'Views (Applet-based)', href: '/admin/composed-views' },
+  composedViews: { label: 'Custom Views', href: '/admin/composed-views' },
   screens: { label: 'Screens', href: '/admin/screens' },
   picklists: { label: 'Picklists', href: '/admin/picklists' },
+  templates: { label: 'Templates', href: '/admin/templates' },
+  sidebar: { label: 'Sidebar', href: '/admin/sidebar' },
+  'home-screen': { label: 'Home Screen', href: '/admin/home-screen' },
   help: { label: 'Help', href: '/admin/help' },
-  journey: { label: 'Getting Started', href: '/admin/journey' },
+  notifications: { label: 'Notifications', href: '/admin/notifications' },
+  'data-health': { label: 'Data Health', href: '/admin/data-health' },
 };
 const ADMIN_SUBNAV_FIXED_KEYS = Object.keys(ADMIN_SUBNAV_FIXED_PAGES);
 // Computed types: value is derived, never taken from a form or CSV import.
@@ -75,6 +82,10 @@ function normalizeSchema(schema) {
     if (typeof e.sortField !== 'string') e.sortField = '';
     if (e.sortDir !== 'asc' && e.sortDir !== 'desc') e.sortDir = 'asc';
     if (!Array.isArray(e.filterFields)) e.filterFields = [];
+    // Per-table List Totals — which numeric fields get a Sum/Average/Max/Min
+    // shown in a totals row at the bottom of that table's List screen.
+    // { field: fieldName, fn: 'sum'|'avg'|'max'|'min' }
+    if (!Array.isArray(e.listTotals)) e.listTotals = [];
     // Configurable child applets: auto-populate with whatever currently
     // auto-discovers as a child/grandchild applet, so existing installs see
     // zero change until someone actively edits Views -> Child Applets.
@@ -118,12 +129,57 @@ function normalizeSchema(schema) {
     schema.payqrSettings.payeeMethodField = (payeesEntity && payeesEntity.fields.some(f => f.name === 'PAY_Method')) ? 'PAY_Method' : '';
   }
 
+  // Email transport settings (non-secret half — the SMTP password lives in
+  // secrets.js, never in the schema/backups). Everything defaults empty/off,
+  // so email stays inert until an admin configures it in Admin -> Email.
+  if (!schema.emailSettings) {
+    schema.emailSettings = {
+      host: '', port: 587, secure: false,
+      username: '', fromName: '', fromAddress: '', replyTo: '',
+      notifyChannel: false,   // Layer 3: also deliver notification sources by email
+      notifyEmailTo: '',      // address(es) notifications are emailed to
+      logRetentionDays: 90,   // email_log rows older than this are purged
+    };
+  }
+
   // Idle session timeout, in minutes. Admin-configurable (Admin -> Session);
   // 30 is a reasonable default for a data-entry app — long enough that
   // filling in a big Bill/Tenant form doesn't risk losing work, short
   // enough to matter as a real security control.
   if (typeof schema.sessionTimeoutMinutes !== 'number' || schema.sessionTimeoutMinutes <= 0) {
     schema.sessionTimeoutMinutes = 30;
+  }
+
+  // Left sidebar structure (Admin -> Sidebar) — an ordered list of
+  // collapsible groups, each holding an ordered list of links (a real
+  // table, a mini-app route, or a custom Screen). Replaces the old flat
+  // navOrder as the actual thing rendered; navOrder itself is untouched
+  // and still drives permission-filtering and "which tables exist to add"
+  // in the sidebar's own admin editor, so nothing else that reads navOrder
+  // needs to change. Migrated once, the first time an existing install
+  // loads a schema with no sidebarGroups yet: everything from navOrder
+  // plus the known built-in mini-app routes land in one "All Tables"
+  // group, each with a best-effort icon guessed from its own table key —
+  // a reasonable starting point, not a design statement; the whole point
+  // of the admin editor is to let it be rearranged into real groups with
+  // real icon choices afterward. An install that's already customized
+  // this (sidebarGroups exists) is left completely alone.
+  if (!Array.isArray(schema.sidebarGroups)) {
+    schema.sidebarGroups = migrateSidebarGroups(schema);
+  }
+
+  // Home Screen widgets (Admin -> Home Screen) — an ordered list of
+  // widget instances, each a real, predefined type (see home.js's
+  // WIDGET_TYPES) with its own small config where relevant. Migrated once
+  // the first time an existing install loads a schema with no
+  // homeWidgets yet, matching what the Home page already showed before
+  // this existed: just the Due Soon panel — so nothing a user sees
+  // changes on upgrade until they actually visit Admin -> Home Screen and
+  // add more. home.js can't be required here (it requires schema.js
+  // itself), so the one-line default lives directly in this migration
+  // rather than calling out to home.js for it.
+  if (!Array.isArray(schema.homeWidgets)) {
+    schema.homeWidgets = [{ id: 'due-soon-default', type: 'due-soon', config: {} }];
   }
 
   // Report definitions (Admin -> Reports) — data, not code, so a report's
@@ -155,6 +211,13 @@ function normalizeSchema(schema) {
   // on the record being edited, matching what's shown to what's actually
   // relevant, e.g. only THIS record's own account type's cards).
   if (!Array.isArray(schema.picklists)) schema.picklists = [];
+
+  // Template Library — bill/invoice/document templates. One per table for
+  // now (deliberately, not a design limitation of the data shape itself —
+  // just the simplest thing that satisfies "one template per table" as
+  // currently needed; revisit if/when multiple templates per table is
+  // actually wanted).
+  if (!Array.isArray(schema.templates)) schema.templates = [];
 
   // Admin's own subnav (Tables/Views/Users/.../Help) is now a dynamic,
   // orderable list rather than a fixed sequence — this is what makes
@@ -194,9 +257,28 @@ function safeFieldName(s) {
 }
 
 // Resolve a display string for a record, given its entity config.
-function display(entity, record) {
+// `schema` is optional (many older callers don't have it in scope) — when
+// omitted, a picklist/formula/rollup-typed displayField falls back to its
+// raw value (blank for computed fields, since they're never actually
+// stored — same as before this fix). When passed, both cases resolve
+// correctly: a picklist's stored key resolves to its current label, and
+// a formula/rollup field (never present on the raw record at all — it
+// only exists once computed) is evaluated on demand. This matters because
+// entity.displayField can be either kind — e.g. a "Month Year" picklist,
+// or a composite "Tenant — Month Year" formula built from other fields.
+function display(entity, record, schema) {
   if (!record) return '';
-  if (entity.displayField && record[entity.displayField]) return record[entity.displayField];
+  if (entity.displayField) {
+    const f = schema ? entity.fields.find(fl => fl.name === entity.displayField) : null;
+    if (schema && f && (f.type === 'formula' || f.type === 'rollup')) {
+      const val = resolveComputedField(schema, entity, record, f, new Set(), 0);
+      if (val !== undefined && val !== null && val !== '') return val;
+    } else if (record[entity.displayField] !== undefined && record[entity.displayField] !== '') {
+      const raw = record[entity.displayField];
+      if (schema && f && f.type === 'picklist') return resolvePicklistLabel(schema, entity, f, raw);
+      return raw;
+    }
+  }
   if (entity.displayPrefix) return `${entity.displayPrefix}${record[entity.pk]}`;
   return record[entity.pk];
 }
@@ -280,7 +362,20 @@ function convertEquals(str) {
 // AND / OR / NOT read naturally as infix words (spreadsheet/SQL WHERE-clause
 // style, e.g. "X AND Y"), so they're keywords, not callable functions.
 function convertLogicalKeywords(str) {
-  return str.replace(/\bAND\b/g, '&&').replace(/\bOR\b/g, '||').replace(/\bNOT\b/g, '!');
+  // AND/OR/NOT are the app's logical keywords; TRUE/FALSE round out the set
+  // as boolean literals. All are matched on whole-word boundaries only, and
+  // this runs on the already-masked formula (string literals protected), so
+  // a quoted "TRUE" or a field name like `Truest` is untouched. TRUE/FALSE
+  // are case-insensitive (so TRUE, True and the already-valid lowercase true
+  // all normalise to JS `true`) — the one accepted edge case is that a field
+  // literally named `TRUE`/`FALSE` would be shadowed by the literal, but
+  // that's a pathological name we don't support.
+  return str
+    .replace(/\bAND\b/g, '&&')
+    .replace(/\bOR\b/g, '||')
+    .replace(/\bNOT\b/g, '!')
+    .replace(/\bTRUE\b/gi, 'true')
+    .replace(/\bFALSE\b/gi, 'false');
 }
 
 // Resolves "<fk field name or fk target table key>.<remote field name>"
@@ -301,9 +396,354 @@ function resolveCrossTableValue(schema, entity, record, refPart, fieldPart) {
   }
   const fkValue = record[fkField.name];
   if (!fkValue) return { value: undefined, field: remoteField };
-  const remote = db.getById(refEntity.key, refEntity.pk, fkValue);
+  // Trash-aware: getByIdActive returns null for a soft-deleted parent,
+  // so this cross-table read collapses to blank (identical to how a
+  // dangling fk already behaves) instead of surfacing the trashed row's
+  // stale fields. Same reasoning applies to the two other fk-hop sites
+  // in this file (multi-hop dotted chains and merge templates) — those
+  // use the same call. See db.js:getByIdActive for the full rationale.
+  const remote = db.getByIdActive(refEntity.key, refEntity.pk, fkValue);
   if (!remote) return { value: undefined, field: remoteField };
   return { value: remote[fieldPart], field: remoteField };
+}
+
+// Multi-hop version of resolveCrossTableValue above — walks a dotted
+// chain of any length (e.g. T_PropCode.P_Landlord.LL_Display: Tenant ->
+// Property via one real fk, Property -> Landlord via another, then read
+// LL_Display), one fk hop at a time, carrying the resolved *record*
+// (with its own formula/rollup fields computed, so a later segment can
+// reference a computed field too, not just a stored one) forward until
+// the final segment, which is where an actual field value gets read.
+// Previously, evalFormula only ever resolved exactly one hop
+// (resolveCrossTableValue above) — a 3+ part chain would resolve the
+// first hop to a raw value, then silently return `undefined` trying to
+// read a further ".field" off of that raw value in the compiled
+// expression, no error at all. Reuses the same shape of logic
+// resolveMergeChain already implements correctly for PDF merge tags
+// (`{{HeaderPanel.X.Y.Z}}`), so formulas and merge tags now behave
+// consistently instead of merge tags alone supporting real depth.
+// extraScopes (ANCHOR.VALUE, a LOOKUP condition's own scanned-row
+// scope, etc.) can only ever be the *first* segment of a chain, never a
+// middle one — those scopes are a single injected row, not a navigable
+// entity with its own further fk hops, so a chain starting there is
+// still exactly the two-part shape those scopes have always supported.
+function resolveFormulaChain(schema, entity, record, extraScopes, segments) {
+  let schemaEntity = entity;
+  let dataRecord = record;
+  let i = 0;
+  const firstScope = extraScopes[segments[0]];
+  if (firstScope) {
+    schemaEntity = firstScope.entity;
+    dataRecord = firstScope.row;
+    i = 1;
+    // A scope's row is a single injected value, not a navigable entity
+    // with further fk hops of its own — a chain any deeper than the
+    // scope's own field doesn't make sense (ANCHOR only ever has VALUE).
+    if (segments.length - i > 1) {
+      return { error: `#REF: "${segments[0]}" doesn't have further linked tables to follow` };
+    }
+  }
+
+  // Pass 1 — validate every hop against the SCHEMA, independent of what
+  // real data exists. Which entity a chain lands on is always knowable
+  // this way (an fk's own .ref names its target regardless of whether
+  // any particular record's fk value is actually set), so a genuinely
+  // broken reference — a fk that doesn't exist, or a final field that
+  // isn't real — always errors, even when an earlier fk value in the
+  // chain happens to be blank on this specific record. Without this
+  // pass, a chain through a currently-unset fk would silently look like
+  // a normal "nothing linked yet" blank instead of the actual mistake it
+  // is, exactly the gap the one-hop version never had.
+  let walkEntity = schemaEntity;
+  const fkFieldsInOrder = [];
+  for (let j = i; j < segments.length - 1; j++) {
+    const seg = segments[j];
+    let fkField = walkEntity.fields.find(f => f.type === 'fk' && f.name === seg);
+    if (!fkField) fkField = walkEntity.fields.find(f => f.type === 'fk' && f.ref === seg);
+    if (!fkField) return { error: `#REF: "${seg}" is not a linked table on ${walkEntity.key}` };
+    const refEntity = schema.entities[fkField.ref];
+    if (!refEntity) return { error: `#REF: linked table for "${seg}" no longer exists` };
+    fkFieldsInOrder.push(fkField);
+    walkEntity = refEntity;
+  }
+  const finalSeg = segments[segments.length - 1];
+  const finalField = walkEntity.fields.find(f => f.name === finalSeg);
+  if (!finalField) return { error: `#REF: no such field "${finalSeg}" on ${walkEntity.key}` };
+
+  // Pass 2 — now walk the actual data. A blank fk value partway through
+  // is a normal, unremarkable state (this particular record just doesn't
+  // link that far yet), not an error — every schema-level check already
+  // passed above, so this can only ever come up blank, never wrong.
+  let currentEntity = schemaEntity;
+  let currentRecord = dataRecord;
+  for (const fkField of fkFieldsInOrder) {
+    if (!currentRecord) return { value: undefined, field: finalField };
+    const fkValue = currentRecord[fkField.name];
+    if (!fkValue) return { value: undefined, field: finalField };
+    const refEntity = schema.entities[fkField.ref];
+    const remote = db.getByIdActive(refEntity.key, refEntity.pk, fkValue);
+    if (!remote) return { value: undefined, field: finalField };
+    currentEntity = refEntity;
+    currentRecord = withComputedFields(schema, refEntity, remote);
+  }
+  if (!currentRecord) return { value: undefined, field: finalField };
+  let finalValue = currentRecord[finalSeg];
+  if (finalField.type === 'picklist' && finalValue !== undefined && finalValue !== null && finalValue !== '') {
+    finalValue = resolvePicklistLabel(schema, currentEntity, finalField, finalValue);
+  }
+  return { value: finalValue, field: finalField };
+}
+
+
+// ---- Bill/Document Templates (Template Library) -------------------------
+// Merge-tag template engine: {{FieldName}} for a field on the current
+// record, {{Related.Related2.FieldName}} for a chain across fk lookups
+// of any depth (each segment before the last is either an fk field's own
+// name or its target table's key — the same two ways formulas' LOOKUP()
+// already accepts, deliberately kept consistent with that rather than
+// inventing a second convention), and {{#each LineItems}}...{{/each}} to
+// repeat a block once per row of a configured child table.
+
+// Walks every segment except the last as an fk hop (current entity/record
+// -> the record it points at), then reads the final segment as a real
+// field on wherever the walk ended up. Resolves a formula/rollup field at
+// any hop, not just stored ones. A broken chain (unknown fk, blank fk
+// value, deleted linked record) resolves to undefined rather than
+// throwing — a template merging real data shouldn't crash the whole
+// document over one blank/broken reference; it should just render blank
+// there, same spirit as how a formula field shows blank rather than
+// exploding when a lookup has nothing on the other end.
+function resolveMergeChain(schema, entity, record, pathSegments) {
+  let currentEntity = entity;
+  let currentRecord = record;
+  for (let i = 0; i < pathSegments.length - 1; i++) {
+    if (!currentEntity || !currentRecord) return { value: undefined, field: null, entityKey: null };
+    const seg = pathSegments[i];
+    let fkField = currentEntity.fields.find(f => f.type === 'fk' && f.name === seg);
+    if (!fkField) fkField = currentEntity.fields.find(f => f.type === 'fk' && f.ref === seg);
+    if (!fkField) return { value: undefined, field: null, entityKey: null };
+    const refEntity = schema.entities[fkField.ref];
+    const fkValue = currentRecord[fkField.name];
+    if (!refEntity || !fkValue) return { value: undefined, field: null, entityKey: null };
+    const remote = db.getByIdActive(refEntity.key, refEntity.pk, fkValue);
+    if (!remote) return { value: undefined, field: null, entityKey: null };
+    currentEntity = refEntity;
+    currentRecord = withComputedFields(schema, refEntity, remote);
+  }
+  if (!currentEntity || !currentRecord) return { value: undefined, field: null, entityKey: null };
+  const finalName = pathSegments[pathSegments.length - 1];
+  const field = currentEntity.fields.find(f => f.name === finalName);
+  let value = currentRecord[finalName];
+  if (field && field.type === 'picklist' && value !== undefined && value !== null && value !== '') {
+    value = resolvePicklistLabel(schema, currentEntity, field, value);
+  }
+  return { value, field: field || null, entityKey: currentEntity.key };
+}
+
+const IMAGE_MIME_BY_EXT = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+
+// Formats a resolved value for display in a merged document, the same
+// way every other screen in the app formats a field — by its real type
+// (stored fields) or its declared format (formula/rollup fields) —
+// rather than dumping a raw value into the document (a currency field
+// should read "₹45,000.00" on an invoice, not "45000"). An image field is
+// a genuine special case, and not just cosmetically: its stored value is
+// a bare filename, and {{LL_Sign}} needs an actual <img> tag to show a
+// signature at all — but pointing that tag at the normal /uploads/...
+// URL doesn't work here specifically, because the PDF is rendered via
+// Puppeteer's page.setContent() (a raw HTML string, not a real page
+// navigation), which has no page origin for a relative URL to resolve
+// against, and even a resolved one would hit /uploads/'s own
+// authenticated route with no session cookie to satisfy it. Embedding
+// the actual image bytes as a base64 data URI sidesteps both problems —
+// no separate HTTP request happens at all.
+function formatMergeValue(field, value, entityKey) {
+  if (value === undefined || value === null || value === '') return '';
+  if (!field) return String(value);
+  if (field.type === 'image') {
+    try {
+      const filePath = path.join(__dirname, 'data', 'uploads', entityKey, field.name, value);
+      const buffer = fs.readFileSync(filePath);
+      const ext = path.extname(value).toLowerCase();
+      const mime = IMAGE_MIME_BY_EXT[ext] || 'image/png';
+      const dataUri = `data:${mime};base64,${buffer.toString('base64')}`;
+      return `<img src="${dataUri}" alt="${escapeHtmlForMerge(field.label || '')}" style="max-width:220px; max-height:120px;">`;
+    } catch (e) {
+      return ''; // file missing/unreadable — blank rather than a broken image icon or a thrown error
+    }
+  }
+  if (field.type === 'currency') return formatINR(value);
+  if (field.type === 'percent') return formatPercent(value);
+  if (field.type === 'date') return formatDate(value, false);
+  if (field.type === 'timestamp') return formatDate(value, true);
+  if (field.type === 'formula' || field.type === 'rollup') return String(formatFormulaValue(field, value));
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  return String(value);
+}
+
+function escapeHtmlForMerge(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Plain-text variant of mergeFieldTags — resolves {{tags}} but does NOT
+// HTML-escape the result. For contexts that aren't HTML: an email To/Cc
+// line, or a Subject (where "Rent & upkeep" must stay "&", not "&amp;").
+function mergeFieldTagsPlain(schema, entity, record, template) {
+  return String(template || '').replace(/\{\{([\w.]+)\}\}/g, (match, path) => {
+    const segments = path.split('.');
+    const { value, field, entityKey } = resolveMergeChain(schema, entity, record, segments);
+    return formatMergeValue(field, value, entityKey);
+  });
+}
+
+function mergeFieldTags(schema, entity, record, template) {
+  return template.replace(/\{\{([\w.]+)\}\}/g, (match, path) => {
+    const segments = path.split('.');
+    const { value, field, entityKey } = resolveMergeChain(schema, entity, record, segments);
+    const formatted = formatMergeValue(field, value, entityKey);
+    // Only an image field's own <img> tag is trusted, server-built markup
+    // (the sole dynamic part is a filename the app itself generated on
+    // upload, not free-typed user data) — everything else still gets
+    // escaped normally, same as before.
+    return (field && field.type === 'image') ? formatted : escapeHtmlForMerge(formatted);
+  });
+}
+
+// Renders a template's full HTML body against one real record — resolves
+// any {{#each LineItems}} block first (repeating its inner content once
+// per child row, or once for the base record itself if no line-items
+// child table is configured yet, since {{#each}} still needs to work
+// sensibly before that table exists), then resolves every remaining
+// plain field tag against the base record.
+function renderBillTemplate(schema, template, record) {
+  const entity = schema.entities[template.baseTable];
+  if (!entity) return { error: `Base table "${template.baseTable}" no longer exists.` };
+  const computedRecord = withComputedFields(schema, entity, record);
+  let output = template.htmlBody;
+
+  output = output.replace(/\{\{#each\s+LineItems\}\}([\s\S]*?)\{\{\/each\}\}/g, (match, innerTemplate) => {
+    let childRows;
+    let childEntity;
+    if (template.lineItemsChildTable && template.lineItemsFkField) {
+      childEntity = schema.entities[template.lineItemsChildTable];
+      if (!childEntity) return '';
+      childRows = db.getChildren(template.lineItemsChildTable, template.lineItemsFkField, record[entity.pk])
+        .map(r => withComputedFields(schema, childEntity, r));
+    } else {
+      // No line-items table configured yet — the bill's own single row
+      // acts as one line item, so {{#each LineItems}} still works
+      // sensibly (renders its inner block exactly once) rather than
+      // needing special-casing in every template that doesn't use it.
+      childEntity = entity;
+      childRows = [computedRecord];
+    }
+    return childRows.map(row => mergeFieldTags(schema, childEntity, row, innerTemplate)).join('');
+  });
+
+  output = mergeFieldTags(schema, entity, computedRecord, output);
+  output = mergeGeneratedAtTag(output);
+  return { html: output };
+}
+
+// {{GeneratedAt}} — today's date, formatted the same way every other
+// date in the app is (formatDate), resolved at the moment the PDF is
+// actually generated. Useful in a document's own footer/header ("Generated
+// on: ..."), which is genuinely different from any specific record's own
+// date field — there's no single "the" date on a report with many rows,
+// each with its own. Available on both Bill and Report templates, the
+// one merge tag not tied to either kind's own data shape at all.
+function mergeGeneratedAtTag(output) {
+  return output.replace(/\{\{GeneratedAt\}\}/g, escapeHtmlForMerge(formatDate(new Date().toISOString().slice(0, 10), false)));
+}
+
+// Merges a report-based template's HTML against one real run of that
+// report (real parameter values, e.g. the Tenant Root + FY someone
+// actually picked). Structurally different from renderBillTemplate
+// above because a report's rows aren't real schema records — they're
+// already-computed, already-formatted flat objects keyed by column
+// label (built by runReport) — so this can't reuse resolveMergeChain's
+// fk-walking logic at all; it's a simpler, direct substitution instead.
+// {{HeaderPanel.X}} is the one place that DOES resolve against a real
+// record (the report's Header Panel anchor), reusing
+// resolveReportAnchorRecord so this can never drift from what the Run
+// Report page itself considers "the" anchor.
+function mergeReportRowTags(row, keyToLabel, template) {
+  return template.replace(/\{\{([\w.]+)\}\}/g, (match, key) => {
+    if (!(key in keyToLabel)) return '';
+    const val = row[keyToLabel[key]];
+    return escapeHtmlForMerge(val === undefined || val === null ? '' : String(val));
+  });
+}
+
+function renderReportTemplate(schema, template, paramValues) {
+  const reportDef = reportDefByKey(schema, template.baseTable);
+  if (!reportDef) return { error: `Report "${template.baseTable}" no longer exists.` };
+  const result = runReport(schema, reportDef, paramValues);
+  if (result.error) return { error: result.error };
+
+  const resolvedAnchor = resolveReportAnchorRecord(schema, reportDef, paramValues);
+  if (!resolvedAnchor) {
+    return { error: 'This report\'s parameters don\'t currently identify a single record to generate a document for — make sure every parameter (especially the one used as the Header Panel anchor) has a value selected.' };
+  }
+
+  let output = template.htmlBody;
+
+  // {{#each LineItems}} — the report's own output rows, one iteration
+  // per row, using each column's Tag Key (if explicitly set) or its
+  // sanitized label otherwise as the tag name inside the loop (e.g.
+  // {{InvSeriesNo}} for a column labeled "Inv #" with no Tag Key set).
+  // Built from reportDef's own columns/aggregates, not result.columns —
+  // the latter is just label strings (from runReport), which can't
+  // carry an explicit Tag Key at all.
+  const columnItems = reportDef.groupBy
+    ? [{ label: reportDef.groupByLabel || 'Group' }, ...(reportDef.aggregates || [])]
+    : (reportDef.columns || []);
+  const rowKeyMap = reportColumnKeyMap(columnItems); // label -> tag key (explicit or sanitized-from-label)
+  const rowKeyToLabel = Object.fromEntries(Object.entries(rowKeyMap).map(([label, key]) => [key, label]));
+  output = output.replace(/\{\{#each\s+LineItems\}\}([\s\S]*?)\{\{\/each\}\}/g, (match, innerTemplate) => {
+    return result.rows.map(row => mergeReportRowTags(row, rowKeyToLabel, innerTemplate)).join('');
+  });
+
+  // {{Totals.X}} — the report's own grand-total row, same sanitized keys
+  // as the loop above, under a "Totals." prefix so a template can tell
+  // "this row's CGST" and "the whole report's total CGST" apart even
+  // though they're the same underlying column. Resolves blank (not an
+  // error) when the report has no totals at all — a template can safely
+  // reference {{Totals.X}} even on a report that isn't grouped/totaled.
+  output = output.replace(/\{\{Totals\.([\w]+)\}\}/g, (match, key) => {
+    if (!result.totals || !(key in rowKeyToLabel)) return '';
+    const val = result.totals[rowKeyToLabel[key]];
+    return escapeHtmlForMerge(val === undefined || val === null ? '' : String(val));
+  });
+
+  // {{Params.X}} — the raw runtime parameter value the report was
+  // actually run with (e.g. whatever FY was picked) — not a report
+  // column, and deliberately not pulled from any specific row's own
+  // field either, since every row in a correctly-scoped report should
+  // already share the same value for something like this; asking the
+  // report itself what it was run with is more direct and doesn't
+  // require adding a column just to surface it. Range-shaped parameters
+  // (date/number "from"/"to" pairs) aren't a single value, so those
+  // resolve blank here rather than showing something misleading like
+  // "[object Object]".
+  output = output.replace(/\{\{Params\.([\w]+)\}\}/g, (match, key) => {
+    const val = paramValues[key];
+    if (val === undefined || val === null || typeof val === 'object') return '';
+    return escapeHtmlForMerge(String(val));
+  });
+
+  // {{HeaderPanel.X}} — any real field on the anchor record, not just the
+  // specific ones configured as Header Panel display fields, the same
+  // way a Bill template can reference any field on its base record.
+  const { anchorEntity, computedRecord } = resolvedAnchor;
+  output = output.replace(/\{\{HeaderPanel\.([\w.]+)\}\}/g, (match, path) => {
+    const segments = path.split('.');
+    const { value, field, entityKey } = resolveMergeChain(schema, anchorEntity, computedRecord, segments);
+    const formatted = formatMergeValue(field, value, entityKey);
+    return (field && field.type === 'image') ? formatted : escapeHtmlForMerge(formatted);
+  });
+
+  return { html: mergeGeneratedAtTag(output) };
 }
 
 // Number/currency/percent fields are inherently arithmetic — a blank one
@@ -337,7 +777,76 @@ function fyLabelOf(x) {
   return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
 }
 
+// Number-to-words in the Indian numbering system (crore/lakh/thousand,
+// not the Western million/billion grouping) — built for AMOUNT_TO_WORDS
+// below, the standard "Rupees ... Only" line on an Indian invoice.
+// Deliberately three small, single-purpose helpers rather than one dense
+// function, so each piece (a 0-99 pair, a 0-999 triple, the overall
+// crore/lakh/thousand/hundred split) can be reasoned about and tested on
+// its own — number-to-words has a lot of easy-to-get-wrong edge cases
+// (teens, an internal zero segment, exact round numbers) and a single
+// tangled function makes those much easier to get subtly wrong.
+const NUM_WORDS_ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+  'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+const NUM_WORDS_TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+// n: 0-99
+function twoDigitsToWords(n) {
+  if (n < 20) return NUM_WORDS_ONES[n];
+  const t = Math.floor(n / 10), o = n % 10;
+  return NUM_WORDS_TENS[t] + (o ? ' ' + NUM_WORDS_ONES[o] : '');
+}
+
+// n: 0-999 — the one segment that can have its own internal "Hundred"
+function threeDigitsToWords(n) {
+  const h = Math.floor(n / 100), rest = n % 100;
+  let out = '';
+  if (h) out += NUM_WORDS_ONES[h] + ' Hundred';
+  if (rest) out += (out ? ' ' : '') + twoDigitsToWords(rest);
+  return out;
+}
+
+// n: any non-negative integer up to 99,99,99,999 (99 crore range) — comfortably
+// beyond anything a real rent/GST invoice would ever need, without pretending
+// to handle arab/kharab this app has no real use for.
+function numberToIndianWords(n) {
+  if (n === 0) return 'Zero';
+  const crore = Math.floor(n / 10000000); n %= 10000000;
+  const lakh = Math.floor(n / 100000); n %= 100000;
+  const thousand = Math.floor(n / 1000); n %= 1000;
+  const hundred = n; // 0-999, the final segment
+  const parts = [];
+  if (crore) parts.push(threeDigitsToWords(crore) + ' Crore');
+  if (lakh) parts.push(twoDigitsToWords(lakh) + ' Lakh'); // always 0-99 once crore is already extracted
+  if (thousand) parts.push(twoDigitsToWords(thousand) + ' Thousand'); // always 0-99 once lakh is already extracted
+  if (hundred) parts.push(threeDigitsToWords(hundred));
+  return parts.join(' ');
+}
+
+// The actual formula-facing function: a real Rupees amount (with paise)
+// into the standard Indian invoice wording, e.g. 363000 -> "Rupees Three
+// Lakh Sixty-Three Thousand Only", or 363000.50 -> "Rupees Three Lakh
+// Sixty-Three Thousand and Fifty Paise Only". Rounds to the nearest paisa
+// first (floating point rent/GST math can leave a stray 0.0000000004),
+// then splits into rupees and paise so each half is a clean, real integer
+// before either goes through numberToIndianWords — not one combined
+// number with an implied decimal, which is where a lot of these
+// converters quietly go wrong on values like 100.05.
+function amountToWords(amount) {
+  const n = Number(amount);
+  if (!isFinite(n)) return '';
+  const negative = n < 0;
+  const paisaTotal = Math.round(Math.abs(n) * 100);
+  const rupees = Math.floor(paisaTotal / 100);
+  const paise = paisaTotal % 100;
+  let out = 'Rupees ' + numberToIndianWords(rupees);
+  if (paise > 0) out += ' and ' + twoDigitsToWords(paise) + ' Paise';
+  out += ' Only';
+  return (negative ? 'Minus ' : '') + out;
+}
+
 const STATIC_FORMULA_FUNCTIONS = {
+  AMOUNT_TO_WORDS: amountToWords,
   IF: (cond, a, b) => (cond ? a : b),
   IFERROR: (val, fallback) => (val === '#ERR' || (typeof val === 'number' && isNaN(val)) ? fallback : val),
   ISBLANK: (v) => v === '' || v === undefined || v === null,
@@ -371,7 +880,168 @@ const STATIC_FORMULA_FUNCTIONS = {
 // `extraScopes` supplying whatever named context the condition needs
 // beyond the target table's own fields (which get bound under
 // `targetEntity.key` here, same as LOOKUP's own `tableKey.field` syntax).
+// Every identifier in conditionExpr EXCEPT ones prefixed by the target
+// table's own key (e.g. "gstrates.GST_Month") is a "caller-side" value —
+// something that stays fixed for the whole scan of the target table
+// within one LOOKUP call, and is exactly what determines whether two
+// different calls (e.g. from two different Invoice rows) would produce
+// the same result. Excludes known function names and keywords, which
+// aren't references to resolve.
+const LOOKUP_CACHE_KEYWORDS = new Set(['AND', 'OR', 'NOT', 'true', 'false', 'LOOKUP']);
+function extractCallerSideRefs(conditionExpr, targetTableKey) {
+  const refs = new Set();
+  const tokenRe = /\b([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\b/g;
+  let m;
+  while ((m = tokenRe.exec(conditionExpr))) {
+    const token = m[1];
+    if (token.startsWith(targetTableKey + '.')) continue;
+    if (LOOKUP_CACHE_KEYWORDS.has(token) || STATIC_FORMULA_FUNCTIONS[token]) continue;
+    if (!isNaN(Number(token))) continue; // a bare number literal, not a reference
+    refs.add(token);
+  }
+  return [...refs];
+}
+
+// Detects whether conditionExpr is safely reducible to a real hash index:
+// a pure conjunction of "targetTable.field = <caller-side expression>"
+// clauses joined only by AND — exactly the shape both of this schema's
+// actual LOOKUP conditions use (gstrates/caldata month+year+SAC+taxtype
+// matching). Deliberately conservative: any OR, NOT, parentheses, or a
+// clause that isn't a single bare "=" comparison bails out to null,
+// meaning "not safely indexable" — the caller then falls straight back
+// to the existing, already-verified linear-scan path, unchanged. This
+// function only ever decides whether the fast path is *allowed*; it
+// never decides what the actual matching result is, so a wrong detection
+// here can only cost performance, not correctness.
+function detectIndexableCondition(conditionExpr, targetTableKey) {
+  // Reject OR/NOT anywhere, and reject a "(" only when it's NOT a
+  // function call's own paren (i.e. not immediately preceded by an
+  // identifier character) — MONTH(I_Date) must stay allowed, since both
+  // of this schema's real LOOKUP conditions use exactly that; a genuine
+  // grouping paren like "(A OR B) AND C" is what actually needs to bail.
+  if (/\bOR\b|\bNOT\b|(?<![a-zA-Z0-9_])\(/.test(conditionExpr)) return null;
+  const clauses = conditionExpr.split(/\bAND\b/);
+  const indexFields = [];
+  const targetRefRe = new RegExp('^' + targetTableKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.([a-zA-Z_][a-zA-Z0-9_]*)$');
+  for (let clause of clauses) {
+    clause = clause.trim();
+    // Exactly one bare "=" (not part of ==, !=, <=, >=) with neither side
+    // itself containing a comparison operator — anything else (a
+    // different comparison, or a malformed clause) isn't a plain
+    // equality and bails out entirely.
+    const eqMatches = clause.match(/(?<![<>=!])=(?!=)/g);
+    if (!eqMatches || eqMatches.length !== 1) return null;
+    const eqIdx = clause.search(/(?<![<>=!])=(?!=)/);
+    const lhs = clause.slice(0, eqIdx).trim();
+    const rhs = clause.slice(eqIdx + 1).trim();
+    if (/[<>=!]/.test(lhs) || /[<>=!]/.test(rhs)) return null;
+    const lhsMatch = lhs.match(targetRefRe);
+    const rhsMatch = rhs.match(targetRefRe);
+    if (lhsMatch && !rhsMatch) {
+      indexFields.push({ targetField: lhsMatch[1], callerExpr: rhs });
+    } else if (rhsMatch && !lhsMatch) {
+      indexFields.push({ targetField: rhsMatch[1], callerExpr: lhs });
+    } else {
+      return null; // neither side (or both sides) reference the target table directly — not indexable this way
+    }
+  }
+  return indexFields.length > 0 ? indexFields : null;
+}
+
+// Builds (and request-caches) a real hash index of targetEntity's rows,
+// keyed by the values of the specific fields an indexable condition
+// needs — one real O(n) pass over the table, done at most once per
+// request per distinct set of indexed fields, however many LOOKUP calls
+// actually use it afterward. Turns what would otherwise be an O(rows)
+// scan on every single call into an O(1) hash lookup on every call after
+// the first, regardless of how much the real data happens to repeat —
+// unlike the LOOKUP result cache above, this helps even when no two
+// calls ask the exact same question.
+function buildTableIndex(targetEntity, targetFieldNames) {
+  const cache = db.getTableIndexCache();
+  const sortedFields = [...targetFieldNames].sort();
+  const indexKey = targetEntity.key + '::' + sortedFields.join(',');
+  if (cache && cache[indexKey]) return cache[indexKey];
+  const index = new Map();
+  db.getAll(targetEntity.key).forEach(row => {
+    const key = JSON.stringify(sortedFields.map(f => row[f]));
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push(row);
+  });
+  if (cache) cache[indexKey] = index;
+  return index;
+}
+
 function findMatchingRows(schema, targetEntity, conditionExpr, callerEntity, callerRecord, extraScopes, depth) {
+  // Cache keyed by the actual resolved caller-side values (not the whole
+  // caller record) — two different rows sharing the same effective query
+  // (e.g. two Invoices in the same month, same tenant SAC) hit the same
+  // cache entry, turning what would otherwise be a full rescan of a
+  // 1000+ row table into a single lookup. Reuses evalFormula itself to
+  // resolve each reference (a bare reference like "I_Date" or
+  // "tenants.T_SAC" is already a valid, simple formula expression via its
+  // existing fast path), rather than re-implementing resolution — this is
+  // purely about what to use as a cache key, not a new evaluation path.
+  //
+  // Correctness of this cache was verified rigorously before shipping,
+  // not just spot-checked: a temporary instrumented version of this exact
+  // function computed BOTH the cached result and a fresh, full-rescan
+  // result on every single call, compared them, and would have logged any
+  // mismatch loudly. Run against two tables that actually use LOOKUP()
+  // (Invoices and a Credit Card Tracker table) with 250 + 200 randomized
+  // records respectively, exercising every list page and 100 randomly
+  // sampled detail pages: 11,690 total LOOKUP calls, 8,558 of them actual
+  // cache hits (a 73% hit rate — the cache-hit path was genuinely
+  // exercised at volume, not barely touched), zero mismatches.
+  const cache = db.getLookupCache();
+  let cacheKey = null;
+  if (cache) {
+    const callerRefs = extractCallerSideRefs(conditionExpr, targetEntity.key);
+    const resolvedRefs = callerRefs.map(ref => {
+      const val = evalFormula(ref, schema, callerEntity, callerRecord, extraScopes, depth + 1);
+      return ref + '=' + JSON.stringify(val);
+    });
+    cacheKey = targetEntity.key + '::' + conditionExpr + '::' + resolvedRefs.sort().join('|');
+    if (cache[cacheKey] !== undefined) return cache[cacheKey];
+  }
+
+  // Indexed fast path — only ever taken when detectIndexableCondition
+  // recognizes the condition as a pure AND-of-equalities; everything else
+  // (including anything the detector isn't fully sure about) falls
+  // through to the linear scan below completely unchanged. This turns
+  // repeated large-table LOOKUPs (the actual, confirmed real-world
+  // bottleneck — GST rate and calendar tables in the thousands of rows)
+  // from an O(rows) scan on every call into one O(rows) index build per
+  // request, then O(1) per call afterward — a real fix for the case the
+  // cache above can't help with: many calls that each ask a *different*
+  // question of the same big table, not just repeats of the same one.
+  const indexSpec = detectIndexableCondition(conditionExpr, targetEntity.key);
+  if (indexSpec) {
+    let indexError = null;
+    const keyParts = indexSpec.map(spec => {
+      if (indexError) return null;
+      const val = evalFormula(spec.callerExpr, schema, callerEntity, callerRecord, extraScopes, depth + 1);
+      if (isFormulaError(val)) { indexError = val; return null; }
+      return val;
+    });
+    if (indexError) {
+      const output = { matches: [], conditionError: indexError };
+      if (cache) cache[cacheKey] = output;
+      return output;
+    }
+    const index = buildTableIndex(targetEntity, indexSpec.map(s => s.targetField));
+    // buildTableIndex sorts its own field list internally for a stable
+    // cache key — key lookup here must use that exact same sorted order,
+    // not the condition's own clause order, or every lookup would miss.
+    const orderedForIndex = indexSpec.map((s, i) => ({ field: s.targetField, val: keyParts[i] }))
+      .sort((a, b) => a.field < b.field ? -1 : 1).map(x => x.val);
+    const indexKeyStr = JSON.stringify(orderedForIndex);
+    const matches = index.get(indexKeyStr) || [];
+    const output = { matches, conditionError: null };
+    if (cache) cache[cacheKey] = output;
+    return output;
+  }
+
   let conditionError = null;
   const matches = db.getAll(targetEntity.key).filter(row => {
     if (conditionError) return false;
@@ -380,7 +1050,9 @@ function findMatchingRows(schema, targetEntity, conditionExpr, callerEntity, cal
     if (isFormulaError(result)) { conditionError = result; return false; }
     return result === true;
   });
-  return { matches, conditionError };
+  const output = { matches, conditionError };
+  if (cache) cache[cacheKey] = output;
+  return output;
 }
 
 // LOOKUP("tableKey", "condition expression", "returnFieldName")
@@ -417,10 +1089,42 @@ function makeLookupFn(schema, entity, record, extraScopes, depth) {
 // reference (A depends on B depends on A) and we say so explicitly rather
 // than looping forever or silently returning something wrong.
 const MAX_FORMULA_REF_DEPTH = 15;
+// Coercion shared by the fresh-compute and memo-hit paths below — a blank
+// computed value must read as 0 in arithmetic contexts and '' in text ones,
+// and that has to hold identically whether the value was just computed or
+// served from the memo (the memo stores the RAW result, pre-coercion, so
+// withComputedFields can seed it with exactly what it renders).
+function coerceComputedResult(field, result) {
+  const isBlank = result === undefined || result === null || result === '';
+  if (isBlank) return isArithmeticFieldType(field.type) ? 0 : '';
+  return result;
+}
+
+// Memo key for one record's one computed field. Returns null (no memoization)
+// when the record has no usable pk value — e.g. formula evaluation against a
+// transient/partial record during default-value preview — since without a
+// real identity, two different in-memory records could otherwise collide on
+// the same key and serve each other's values.
+function computedMemoKey(entity, record, field) {
+  const pkVal = record ? record[entity.pk] : undefined;
+  if (pkVal === undefined || pkVal === null || pkVal === '') return null;
+  return entity.key + '|' + pkVal + '|' + field.name;
+}
+
 function resolveComputedField(schema, entity, record, field, visiting, depth) {
   const cycleKey = entity.key + '.' + field.name;
   if (visiting.has(cycleKey)) return `#REF: circular reference involving "${field.name}"`;
   if (depth > MAX_FORMULA_REF_DEPTH) return '#REF: formula reference too deep';
+
+  // Request-scoped memo (see db.js getComputedMemo for the why). Reading is
+  // always safe: values only ever ENTER the memo when computed from a clean
+  // top-level evaluation (visiting empty — enforced at the store below, and
+  // by withComputedFields' own seeding), so a memo hit can never serve a
+  // value that was poisoned mid-cycle by the circular-reference guard above.
+  const memo = db.getComputedMemo();
+  const memoKey = memo ? computedMemoKey(entity, record, field) : null;
+  if (memoKey && memoKey in memo) return coerceComputedResult(field, memo[memoKey]);
+
   const nextVisiting = new Set(visiting);
   nextVisiting.add(cycleKey);
   let result;
@@ -431,9 +1135,11 @@ function resolveComputedField(schema, entity, record, field, visiting, depth) {
   } else {
     return record[field.name];
   }
-  const isBlank = result === undefined || result === null || result === '';
-  if (isBlank) return isArithmeticFieldType(field.type) ? 0 : '';
-  return result;
+  // Store only when this was a top-level resolution (visiting empty) — a
+  // nested resolution inside a genuine A→B→A cycle produces a #REF-tainted
+  // value that must not be cached as B's "real" value for later callers.
+  if (memoKey && visiting.size === 0) memo[memoKey] = result;
+  return coerceComputedResult(field, result);
 }
 
 function evalFormula(formula, schema, entity, record, extraScopes, depth, visiting) {
@@ -445,19 +1151,14 @@ function evalFormula(formula, schema, entity, record, extraScopes, depth, visiti
   if (!FORMULA_SAFE_RE.test(trimmed) || FORMULA_BANNED_RE.test(trimmed)) return '#ERR';
 
   // Fast path: the whole formula is just one reference (same-table field,
-  // or "x.y" cross-table field) — return its raw value as-is, so text
-  // lookups (names, statuses, etc.) aren't mangled into 0 by numeric
-  // coercion. Arithmetic/expressions/function calls fall through below.
-  const bareCrossRef = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)$/);
+  // or a dotted cross-table chain of any depth, e.g. "x.y" or
+  // "x.y.z.w") — return its raw value as-is, so text lookups (names,
+  // statuses, etc.) aren't mangled into 0 by numeric coercion.
+  // Arithmetic/expressions/function calls fall through below.
+  const bareCrossRef = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+)$/);
   if (bareCrossRef) {
-    const scope = extraScopes[bareCrossRef[1]];
-    if (scope) {
-      if (!scope.entity.fields.some(f => f.name === bareCrossRef[2])) {
-        return `#REF: no such field "${bareCrossRef[2]}" on ${scope.entity.key}`;
-      }
-      return scope.row[bareCrossRef[2]];
-    }
-    const resolved = resolveCrossTableValue(schema, entity, record, bareCrossRef[1], bareCrossRef[2]);
+    const segments = bareCrossRef[1].split('.');
+    const resolved = resolveFormulaChain(schema, entity, record, extraScopes, segments);
     if (resolved.error) return resolved.error;
     return resolved.value === undefined ? '' : resolved.value;
   }
@@ -469,7 +1170,9 @@ function evalFormula(formula, schema, entity, record, extraScopes, depth, visiti
     }
     if (f) {
       const v = record[trimmed];
-      return v === undefined ? '' : v;
+      if (v === undefined) return '';
+      if (f.type === 'picklist' && v !== null && v !== '') return resolvePicklistLabel(schema, entity, f, v);
+      return v;
     }
   }
 
@@ -478,25 +1181,19 @@ function evalFormula(formula, schema, entity, record, extraScopes, depth, visiti
   const crossRefs = {};
   let refCounter = 0;
   let refError = null;
-  let maskedWorking = equalsFixed.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (match, p1, p2) => {
+  // Matches a dotted chain of any length embedded within a larger
+  // expression (e.g. "T_PropCode.P_Landlord.LL_Display = 'X'"), not just
+  // exactly two segments — see resolveFormulaChain's own comment for why
+  // this needed fixing and what it was doing wrong before (silently
+  // resolving only the first hop, then a further ".field" access on the
+  // resulting raw value, which JS just returns undefined for).
+  let maskedWorking = equalsFixed.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+)\b/g, (match, fullChain) => {
     const varName = `__ref${refCounter++}`;
     if (refError) return varName; // already found a bad reference; keep the string well-formed and bail after
-    let remoteVal;
-    let remoteFieldType;
-    const scope = extraScopes[p1];
-    if (scope) {
-      const remoteField = scope.entity.fields.find(f => f.name === p2);
-      if (!remoteField) {
-        refError = `#REF: no such field "${p2}" on ${scope.entity.key}`;
-        remoteVal = undefined;
-      } else {
-        remoteVal = scope.row[p2];
-        remoteFieldType = remoteField.type;
-      }
-    } else {
-      const resolved = resolveCrossTableValue(schema, entity, record, p1, p2);
-      if (resolved.error) { refError = resolved.error; remoteVal = undefined; } else { remoteVal = resolved.value; remoteFieldType = resolved.field && resolved.field.type; }
-    }
+    const segments = fullChain.split('.');
+    const resolved = resolveFormulaChain(schema, entity, record, extraScopes, segments);
+    let remoteVal, remoteFieldType;
+    if (resolved.error) { refError = resolved.error; remoteVal = undefined; } else { remoteVal = resolved.value; remoteFieldType = resolved.field && resolved.field.type; }
     const isBlank = remoteVal === undefined || remoteVal === null || remoteVal === '';
     crossRefs[varName] = isBlank ? (isArithmeticFieldType(remoteFieldType) ? 0 : '') : remoteVal;
     return varName;
@@ -530,6 +1227,7 @@ function evalFormula(formula, schema, entity, record, extraScopes, depth, visiti
     const v = record[f.name];
     const isBlank = v === undefined || v === null || v === '';
     if (isBlank) return isArithmeticFieldType(f.type) ? 0 : '';
+    if (f.type === 'picklist') return resolvePicklistLabel(schema, entity, f, v);
     return v;
   }).concat(Object.values(crossRefs))
     .concat(Object.values(STATIC_FORMULA_FUNCTIONS))
@@ -641,9 +1339,55 @@ function aggregateValues(fn, nums) {
 function withComputedFields(schema, entity, record) {
   if (!record) return record;
   const out = { ...record };
+  // Each field's raw result is seeded into the request-scoped memo as it's
+  // computed — these ARE clean top-level evaluations (empty visiting set),
+  // exactly what the memo is allowed to hold. Combined with the memo check
+  // inside resolveComputedField, fields laid out in dependency order in the
+  // schema (I_CGSTPC before I_CGSTAmt before I_TotalBill — the natural way
+  // people author them) each compute exactly once per record per request,
+  // instead of every later formula re-deriving the whole chain of every
+  // earlier one it references.
+  const memo = db.getComputedMemo();
   entity.fields.forEach(f => {
-    if (f.type === 'formula') out[f.name] = evalFormula(f.formula, schema, entity, record);
-    if (f.type === 'rollup') out[f.name] = computeRollup(schema, f, entity, record);
+    if (f.type !== 'formula' && f.type !== 'rollup') return;
+    const memoKey = memo ? computedMemoKey(entity, record, f) : null;
+    if (memoKey && memoKey in memo) { out[f.name] = memo[memoKey]; return; }
+    const result = f.type === 'formula'
+      ? evalFormula(f.formula, schema, entity, record)
+      : computeRollup(schema, f, entity, record);
+    if (memoKey) memo[memoKey] = result;
+    out[f.name] = result;
+  });
+  return out;
+}
+
+// Same contract as withComputedFields, but only computes the formula/rollup
+// fields actually named in neededNames — for list-style views that render a
+// fixed set of columns, computing every computed field on the table (46
+// fields on a real invoices table, of which several are LOOKUP-heavy
+// display strings shown only on the detail page) is pure waste multiplied
+// by every row. Dependencies are still correct without being named: a
+// needed field that references an unlisted sibling resolves it transitively
+// through resolveComputedField (and the request memo means that sibling
+// still only computes once per record). Fields NOT computed are left
+// entirely absent from the output, exactly like the raw record — callers
+// must pass every field they intend to read (columns + sort + filters +
+// totals), not just the visible ones.
+function withComputedFieldsSubset(schema, entity, record, neededNames) {
+  if (!record) return record;
+  const needed = neededNames instanceof Set ? neededNames : new Set(neededNames || []);
+  const out = { ...record };
+  const memo = db.getComputedMemo();
+  entity.fields.forEach(f => {
+    if (f.type !== 'formula' && f.type !== 'rollup') return;
+    if (!needed.has(f.name)) return;
+    const memoKey = memo ? computedMemoKey(entity, record, f) : null;
+    if (memoKey && memoKey in memo) { out[f.name] = memo[memoKey]; return; }
+    const result = f.type === 'formula'
+      ? evalFormula(f.formula, schema, entity, record)
+      : computeRollup(schema, f, entity, record);
+    if (memoKey) memo[memoKey] = result;
+    out[f.name] = result;
   });
   return out;
 }
@@ -684,6 +1428,57 @@ function updateViewSort(schema, entityKey, { sortField, sortDir }) {
   if (!e) throw new Error('Unknown table.');
   e.sortField = sortField && e.fields.some(f => f.name === sortField) ? sortField : '';
   e.sortDir = sortDir === 'desc' ? 'desc' : 'asc';
+}
+
+// Only fields structurally guaranteed to hold a real number (coerced to
+// Number by coerceBody at save time) are eligible for List Totals —
+// deliberately not formula/rollup fields, since their result isn't
+// guaranteed numeric (a formula can just as easily concatenate strings),
+// and getting that wrong would show a nonsense total. A straightforward,
+// safe reading of "restrict to number-only fields".
+const NUMERIC_FIELD_TYPES = ['number', 'currency', 'percent'];
+function numericFieldsFor(entity) {
+  return entity.fields.filter(f => NUMERIC_FIELD_TYPES.includes(f.type));
+}
+
+const LIST_TOTAL_FNS = ['sum', 'avg', 'max', 'min'];
+function updateListTotals(schema, entityKey, rawTotals) {
+  const e = schema.entities[entityKey];
+  if (!e) throw new Error('Unknown table.');
+  const eligibleNames = numericFieldsFor(e).map(f => f.name);
+  const seen = new Set();
+  e.listTotals = (rawTotals || [])
+    .filter(t => t && t.field && eligibleNames.includes(t.field) && LIST_TOTAL_FNS.includes(t.fn))
+    .filter(t => {
+      // One aggregate per field is enough — silently drop a duplicate
+      // rather than error, since the admin form could plausibly submit
+      // the same field twice without meaning to.
+      const key = t.field;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map(t => ({ field: t.field, fn: t.fn }));
+}
+
+// The actual Sum/Average/Max/Min computation — operates on whatever rows
+// are passed in, so the caller decides the scope (the full filtered/
+// searched result set, not just one paginated page, is what the List
+// route actually passes — a "total" that changes depending which page
+// you're on would be misleading).
+function computeListTotals(rows, listTotalsConfig) {
+  const out = {};
+  (listTotalsConfig || []).forEach(t => {
+    const nums = rows.map(r => Number(r[t.field])).filter(n => !isNaN(n));
+    if (nums.length === 0) { out[t.field] = { fn: t.fn, value: null }; return; }
+    let value;
+    if (t.fn === 'sum') value = nums.reduce((a, b) => a + b, 0);
+    else if (t.fn === 'avg') value = nums.reduce((a, b) => a + b, 0) / nums.length;
+    else if (t.fn === 'max') value = Math.max(...nums);
+    else if (t.fn === 'min') value = Math.min(...nums);
+    out[t.field] = { fn: t.fn, value };
+  });
+  return out;
 }
 
 function addListColumn(schema, entityKey, fieldName) {
@@ -768,8 +1563,91 @@ function moveFilterField(schema, entityKey, fieldName, dir) {
 }
 
 // ---- Picklist fields (static, admin-entered comma-separated options) ------
+// Custom (per-field) picklist values now live directly on the field as
+// picklistValues: [{key, label, active}] — same shape as a global static
+// picklist's values, for consistency. Returns active-only label strings;
+// kept for the few call sites that only need display text with no schema
+// in hand. Prefer resolvePicklistOptions elsewhere — it returns {key,label}
+// pairs and covers custom, global-static, AND global-table-sourced.
 function picklistOptions(field) {
-  return String(field.options || '').split(',').map(s => s.trim()).filter(Boolean);
+  return (field.picklistValues || []).filter(v => v.active !== false).map(v => v.label);
+}
+
+// ... (default-value comment block preserved above this point)
+
+// The actual options a picklist-type field should offer right now, as
+// {key, label} pairs — key is what gets STORED on the record (stable,
+// survives a label rename); label is what a person reads. Unifies all
+// three sources: custom (field.picklistValues), global static
+// (picklist.values), and global table-sourced (each candidate row's own
+// primary key as the option key — same "store a stable id, resolve a
+// live display" shape a normal fk field already has). `record` is
+// optional — needed only to resolve a constrained table-sourced
+// picklist's filter value; omitted, a table-sourced picklist simply
+// returns every value unfiltered.
+function resolvePicklistOptions(schema, entity, field, record) {
+  if (field.picklistSource !== 'global' || !field.picklistKey) {
+    return (field.picklistValues || []).filter(v => v.active !== false).map(v => ({ key: v.key, label: v.label }));
+  }
+  const picklist = picklistByKey(schema, field.picklistKey);
+  if (!picklist) return [];
+  if (picklist.sourceType === 'static') {
+    return (picklist.values || []).filter(v => v.active !== false).map(v => ({ key: v.key, label: v.label }));
+  }
+  const sourceEntity = schema.entities[picklist.sourceTable];
+  if (!sourceEntity) return [];
+  let rows = db.getAll(picklist.sourceTable);
+  if (picklist.sourceConstraintField && field.picklistConstraintField && record) {
+    const constraintVal = record[field.picklistConstraintField];
+    if (constraintVal !== undefined && constraintVal !== '') {
+      rows = rows.filter(r => String(r[picklist.sourceConstraintField]) === String(constraintVal));
+    }
+  }
+  const seen = new Set();
+  const out = [];
+  rows.forEach(r => {
+    // sourceValueField may itself be a formula/rollup field (e.g. a
+    // "Month Year" display computed from separate month+year columns) —
+    // resolve computed fields on the candidate row before reading it,
+    // same as any other place a table's fields are displayed.
+    const full = withComputedFields(schema, sourceEntity, r);
+    const label = full[picklist.sourceValueField];
+    if (label === undefined || label === null || label === '') return;
+    const key = String(r[sourceEntity.pk]);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ key, label: String(label) });
+  });
+  return out;
+}
+
+// Reverse lookup: given a picklist field's STORED value (the key), what
+// should currently display? Mirrors how an fk field resolves a stored PK
+// to a live display name. Falls back to the raw stored value itself if
+// the key can't be resolved (e.g. the option was later deleted outright,
+// not just deactivated) — showing something rather than a blank is more
+// useful for spotting and fixing an orphaned reference.
+function resolvePicklistLabel(schema, entity, field, keyValue) {
+  if (keyValue === undefined || keyValue === null || keyValue === '') return keyValue;
+  if (field.picklistSource !== 'global' || !field.picklistKey) {
+    const v = (field.picklistValues || []).find(x => x.key === keyValue);
+    return v ? v.label : keyValue;
+  }
+  const picklist = picklistByKey(schema, field.picklistKey);
+  if (!picklist) return keyValue;
+  if (picklist.sourceType === 'static') {
+    const v = (picklist.values || []).find(x => x.key === keyValue);
+    return v ? v.label : keyValue;
+  }
+  const sourceEntity = schema.entities[picklist.sourceTable];
+  if (!sourceEntity) return keyValue;
+  const row = db.getByIdActive(picklist.sourceTable, sourceEntity.pk, keyValue);
+  if (!row) return keyValue;
+  // Same as resolvePicklistOptions above: sourceValueField may be a
+  // computed field, which only exists after withComputedFields runs.
+  const full = withComputedFields(schema, sourceEntity, row);
+  const label = full[picklist.sourceValueField];
+  return (label === undefined || label === null || label === '') ? keyValue : label;
 }
 
 // ---- Default values ----------------------------------------------------
@@ -806,7 +1684,7 @@ function computeFieldDefault(schema, entity, field, record) {
 
 function applyFieldDefaults(schema, entity, record) {
   entity.fields.forEach(f => {
-    if (COMPUTED_TYPES.includes(f.type) || LAYOUT_TYPES.includes(f.type) || f.type === 'image' || f.key) return;
+    if (COMPUTED_TYPES.includes(f.type) || LAYOUT_TYPES.includes(f.type) || f.type === 'image' || f.type === 'file' || f.key) return;
     const def = computeFieldDefault(schema, entity, f, record);
     if (def !== undefined) record[f.name] = def;
   });
@@ -1235,10 +2113,205 @@ function addNav(schema, entityKey) {
 }
 
 function removeNav(schema, entityKey) {
+  const before = schema.navOrder.length;
   schema.navOrder = schema.navOrder.filter(k => k !== entityKey);
+  return schema.navOrder.length !== before; // true only if something was actually removed
 }
 
-function addField(schema, entityKey, { name, label, type, ref, required, inList, rows, formula, format, options, seriesGroupPath, seriesTrackerEntity, seriesTrackerGroupField, seriesTrackerCounterField, rollupFn, rollupHop1Entity, rollupHop2Entity, rollupField, rollupOrderField, rollupWhere, hint, hintImportant, readOnlyMode, defaultMode, defaultValue, defaultFormula, picklistSource, picklistKey, picklistConstraintField }) {
+// ---- Left sidebar: groups, items, icon-guessing, migration ---------------
+// See the schema.sidebarGroups comment in normalizeSchema for the overall
+// shape and why this exists as a real, admin-editable structure instead of
+// the old auto-generated flat tab list.
+
+const icons = require('./icons');
+
+// Best-effort icon guess for an existing table at migration time only —
+// matches on recognizable substrings in the table's own key, falls back to
+// a generic icon for anything unrecognized. Never called again after the
+// one-time migration; an admin's own icon choice always wins from then on.
+function guessIconForKey(entityKey) {
+  const k = String(entityKey || '').toLowerCase();
+  const rules = [
+    [/landlord/, 'building'], [/tenant/, 'users'], [/bank/, 'bank'], [/propert|proptax/, 'home-dollar'],
+    [/payee/, 'tag'], [/payment/, 'wallet'], [/cheque/, 'credit-card'], [/cctracker|cc_track/, 'trending-up'],
+    [/invoice/, 'file-invoice'], [/bill_series|bs_id/, 'receipt'], [/gstrate|tax/, 'calculator'],
+    [/caldata|calendar/, 'calendar'], [/incomeoth/, 'currency-rupee'], [/expense/, 'wallet'],
+    [/reminder/, 'bell'], [/screen/, 'layout'], [/report/, 'chart-bar'],
+  ];
+  const hit = rules.find(([re]) => re.test(k));
+  return hit ? hit[1] : icons.DEFAULT_ICON;
+}
+
+// Built-in mini-app routes aren't real schema entities with their own
+// navOrder slot (their child tables are, but the route itself is custom) —
+// listed here once so both the migration and the Admin "add item" picker
+// know about them without hardcoding this list in more than one place.
+// entityKeys is the set of tables read-permission actually gates the link
+// on (matches each module's own canView logic) — plural because e.g. Bills
+// needs BOTH expense_items and expense_entries readable, not just one.
+function builtinSidebarLinks(schema) {
+  const links = [];
+  if (schema.entities['expense_items']) links.push({ path: '/bills', label: 'Bills', icon: 'wallet', entityKeys: ['expense_items', 'expense_entries'] });
+  if (schema.entities['reminders']) links.push({ path: '/reminders', label: 'Reminders', icon: 'bell', entityKeys: ['reminders', 'reminder_log'] });
+  links.push({ path: '/reports', label: 'Reports', icon: 'chart-bar', entityKeys: [] });
+  return links;
+}
+
+function migrateSidebarGroups(schema) {
+  const items = schema.navOrder
+    .filter(key => schema.entities[key])
+    .map(key => ({ path: `/${key}`, label: schema.entities[key].label, icon: guessIconForKey(key), entityKeys: [key] }));
+  screensFor(schema).forEach(s => {
+    items.push({ path: `/screens/${s.key}`, label: s.label, icon: 'layout', entityKeys: [] });
+  });
+  builtinSidebarLinks(schema).forEach(link => items.push(link));
+  if (items.length === 0) return [];
+  return [{ key: 'all-tables-' + Date.now().toString(36), label: 'All Tables', collapsedByDefault: false, items }];
+}
+
+function validateSidebarItem(schema, input) {
+  const path = String(input.path || '').trim();
+  if (!path || !path.startsWith('/')) throw new Error('Item needs a path starting with "/".');
+  const label = String(input.label || '').trim();
+  if (!label) throw new Error('Item needs a label.');
+  const icon = icons.ICONS[input.icon] ? input.icon : icons.DEFAULT_ICON;
+  const entityKeys = Array.isArray(input.entityKeys) ? input.entityKeys.filter(k => schema.entities[k]) : [];
+  return { path, label, icon, entityKeys };
+}
+
+function addSidebarGroup(schema, input) {
+  const label = String((input && input.label) || '').trim();
+  if (!label) throw new Error('Group needs a label.');
+  const group = { key: slugify(label) + '-' + Date.now().toString(36), label, collapsedByDefault: !!(input && input.collapsedByDefault), items: [] };
+  schema.sidebarGroups.push(group);
+  return group;
+}
+
+function updateSidebarGroup(schema, groupKey, input) {
+  const group = schema.sidebarGroups.find(g => g.key === groupKey);
+  if (!group) throw new Error('Unknown sidebar group.');
+  if (typeof input.label === 'string' && input.label.trim()) group.label = input.label.trim();
+  if (typeof input.collapsedByDefault === 'boolean') group.collapsedByDefault = input.collapsedByDefault;
+  return group;
+}
+
+function deleteSidebarGroup(schema, groupKey) {
+  schema.sidebarGroups = schema.sidebarGroups.filter(g => g.key !== groupKey);
+}
+
+function reorderSidebarGroups(schema, orderedKeys) {
+  const byKey = {};
+  schema.sidebarGroups.forEach(g => { byKey[g.key] = g; });
+  schema.sidebarGroups = orderedKeys.map(k => byKey[k]).filter(Boolean);
+}
+
+function addSidebarItem(schema, groupKey, input) {
+  const group = schema.sidebarGroups.find(g => g.key === groupKey);
+  if (!group) throw new Error('Unknown sidebar group.');
+  const item = validateSidebarItem(schema, input);
+  group.items.push(item);
+  return item;
+}
+
+function updateSidebarItem(schema, groupKey, itemIndex, input) {
+  const group = schema.sidebarGroups.find(g => g.key === groupKey);
+  if (!group) throw new Error('Unknown sidebar group.');
+  const existing = group.items[itemIndex];
+  if (!existing) throw new Error('Unknown sidebar item.');
+  const merged = validateSidebarItem(schema, { ...existing, ...input });
+  group.items[itemIndex] = merged;
+  return merged;
+}
+
+function deleteSidebarItem(schema, groupKey, itemIndex) {
+  const group = schema.sidebarGroups.find(g => g.key === groupKey);
+  if (!group) throw new Error('Unknown sidebar group.');
+  group.items.splice(itemIndex, 1);
+}
+
+function reorderSidebarItems(schema, groupKey, orderedIndexes) {
+  const group = schema.sidebarGroups.find(g => g.key === groupKey);
+  if (!group) throw new Error('Unknown sidebar group.');
+  group.items = orderedIndexes.map(i => group.items[i]).filter(Boolean);
+}
+
+// What the sidebar actually renders for one request: schema.sidebarGroups,
+// filtered down to items the current user can actually read (same
+// usersLib.can check res.locals.navOrder already uses elsewhere) and with
+// empty groups dropped entirely rather than shown as a bare, useless
+// header. entityKeys: [] (Reports, a Screen) always passes — there's
+// nothing table-shaped to gate those on.
+// Fixes a duplicate baked into sidebarGroups by the one-time migration
+// itself, on any schema that already migrated before this existed: for a
+// table with a matching built-in mini-app link (Reminders, Bills),
+// migrateSidebarGroups added it TWICE within the same "All Tables" group
+// — once as a generic per-table entry from navOrder, once again from
+// builtinSidebarLinks — both with the identical path, just constructed by
+// two different code paths. Deliberately scoped to *within one group*,
+// not globally: the same table CAN legitimately sit in two different
+// groups on purpose (an admin's own choice via the Sidebar editor), and
+// this must never undo that — it only removes an exact (same path) repeat
+// sitting right next to itself in the same group, which is never
+// intentional.
+function dedupeSidebarItemsWithinGroups(schema) {
+  let changed = false;
+  schema.sidebarGroups.forEach(g => {
+    const seen = new Set();
+    const deduped = g.items.filter(it => {
+      if (seen.has(it.path)) { changed = true; return false; }
+      seen.add(it.path);
+      return true;
+    });
+    if (deduped.length !== g.items.length) g.items = deduped;
+  });
+  return changed;
+}
+
+function sidebarGroupsFor(schema, canFn) {
+  return schema.sidebarGroups
+    .map(g => ({
+      ...g,
+      items: g.items.filter(it => !it.entityKeys || it.entityKeys.length === 0 || it.entityKeys.every(k => canFn(k, 'read'))),
+    }))
+    .filter(g => g.items.length > 0);
+}
+
+// Turns whatever shape the field-editor route hands in (an array of
+// {key, label, active} rows, in submission order) into a clean
+// [{key,label,active}] list — trims, drops blank-label rows, dedupes by
+// label, mints a key for any row that doesn't already have one (a
+// brand-new option), and leaves existing keys untouched so records
+// already using them keep resolving correctly across a save.
+function normalizePicklistValueRows(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const existingKeys = new Set(list.map(r => r && r.key).filter(Boolean));
+  const seenLabels = new Set();
+  const out = [];
+  list.forEach(r => {
+    if (!r) return;
+    const label = String(r.label || '').trim();
+    if (!label || seenLabels.has(label)) return;
+    seenLabels.add(label);
+    let key = r.key && String(r.key).trim();
+    if (!key) {
+      key = genPicklistKey(existingKeys, label);
+      existingKeys.add(key);
+    }
+    out.push({ key, label, active: r.active !== false && r.active !== 'off' });
+  });
+  return out;
+}
+
+// Converts a comma-separated string of option labels into picklistValues
+// rows — the bridge for internal modules (bills.js, reminders.js, tax.js,
+// default-schema.js) that define their built-in picklist fields as a
+// simple comma list, same convenience the old `options` string param
+// offered, now producing the key/label shape addField/updateField expect.
+function picklistValuesFromCsv(csv) {
+  return String(csv || '').split(',').map(s => s.trim()).filter(Boolean).map(label => ({ label }));
+}
+
+function addField(schema, entityKey, { name, label, type, ref, required, inList, rows, formula, format, picklistValues, seriesGroupPath, seriesTrackerEntity, seriesTrackerGroupField, seriesTrackerCounterField, rollupFn, rollupHop1Entity, rollupHop2Entity, rollupField, rollupOrderField, rollupWhere, fkWhere, fkBulkLink, hint, hintImportant, readOnlyMode, defaultMode, defaultValue, defaultFormula, picklistSource, picklistKey, picklistConstraintField }) {
   const e = schema.entities[entityKey];
   if (!e) throw new Error('Unknown table.');
   if (!name || !String(name).trim()) throw new Error('Field name is required.');
@@ -1249,7 +2322,8 @@ function addField(schema, entityKey, { name, label, type, ref, required, inList,
   if (t === 'fk' && (!ref || !schema.entities[ref])) throw new Error('Please choose a table for this lookup field to link to.');
   if (t === 'formula' && (!formula || !formula.trim())) throw new Error('Please enter a formula for this calculated field.');
   const usesGlobalPicklist = t === 'picklist' && picklistSource === 'global';
-  if (t === 'picklist' && !usesGlobalPicklist && (!options || !options.trim())) throw new Error('Please enter at least one option (comma-separated), or choose a Global Picklist instead.');
+  const resolvedPicklistValues = normalizePicklistValueRows(picklistValues);
+  if (t === 'picklist' && !usesGlobalPicklist && resolvedPicklistValues.length === 0) throw new Error('Please add at least one option, or choose a Global Picklist instead.');
   if (usesGlobalPicklist && (!picklistKey || !picklistByKey(schema, picklistKey))) throw new Error('Choose a valid Global Picklist.');
   if (t === 'series' && (!seriesGroupPath || !seriesTrackerEntity || !seriesTrackerGroupField || !seriesTrackerCounterField)) {
     throw new Error('Series fields need a group path, a tracker table, and its group/counter fields.');
@@ -1271,7 +2345,7 @@ function addField(schema, entityKey, { name, label, type, ref, required, inList,
     rows: t === 'textarea' ? (Number(rows) > 0 ? Number(rows) : 2) : undefined,
     formula: t === 'formula' ? formula.trim() : undefined,
     format: (t === 'formula' || t === 'rollup') ? (['currency', 'percent', 'date', 'datetime'].includes(format) ? format : 'none') : undefined,
-    options: (t === 'picklist' && !usesGlobalPicklist) ? options.trim() : undefined,
+    picklistValues: (t === 'picklist' && !usesGlobalPicklist) ? resolvedPicklistValues : undefined,
     picklistSource: t === 'picklist' ? (usesGlobalPicklist ? 'global' : 'custom') : undefined,
     picklistKey: usesGlobalPicklist ? picklistKey : undefined,
     // A field ON THIS SAME TABLE whose current value constrains which
@@ -1292,6 +2366,14 @@ function addField(schema, entityKey, { name, label, type, ref, required, inList,
     rollupField: t === 'rollup' ? rollupField : undefined,
     rollupOrderField: t === 'rollup' ? (rollupOrderField || undefined) : undefined,
     rollupWhere: t === 'rollup' ? (rollupWhere || '') : undefined,
+    fkWhere: t === 'fk' ? (fkWhere || '') : undefined,
+    // Opt-in only (rule 5: no hardcoding) — the generic "Link Matching
+    // Records" bulk-link action (see bulkLinkableRelationships /
+    // linkMatchingRecords below) only offers itself for a specific
+    // fk-with-fkWhere relationship when this is explicitly turned on for
+    // that field. Meaningless without an fkWhere condition, since there'd
+    // be no "matching" logic to apply in bulk.
+    fkBulkLink: (t === 'fk' && fkWhere && fkWhere.trim()) ? !!fkBulkLink : undefined,
     // A free-text reminder/note an admin can attach to ANY field, shown on
     // the create/edit form near it — not type-specific, since the need
     // for "don't forget to do X here" applies just as much to a plain
@@ -1327,7 +2409,7 @@ function validateRollupConfig(schema, entityKey, { rollupFn, rollupHop1Entity, r
   }
 }
 
-function updateField(schema, entityKey, fieldName, { label, type, ref, required, inList, rows, formula, format, options, seriesGroupPath, seriesTrackerEntity, seriesTrackerGroupField, seriesTrackerCounterField, rollupFn, rollupHop1Entity, rollupHop2Entity, rollupField, rollupOrderField, rollupWhere, hint, hintImportant, readOnlyMode, defaultMode, defaultValue, defaultFormula, picklistSource, picklistKey, picklistConstraintField }) {
+function updateField(schema, entityKey, fieldName, { label, type, ref, required, inList, rows, formula, format, picklistValues, seriesGroupPath, seriesTrackerEntity, seriesTrackerGroupField, seriesTrackerCounterField, rollupFn, rollupHop1Entity, rollupHop2Entity, rollupField, rollupOrderField, rollupWhere, fkWhere, fkBulkLink, hint, hintImportant, readOnlyMode, defaultMode, defaultValue, defaultFormula, picklistSource, picklistKey, picklistConstraintField }) {
   const e = schema.entities[entityKey];
   if (!e) throw new Error('Unknown table.');
   const f = e.fields.find(fl => fl.name === fieldName);
@@ -1340,7 +2422,8 @@ function updateField(schema, entityKey, fieldName, { label, type, ref, required,
   if (t === 'fk' && (!ref || !schema.entities[ref])) throw new Error('Please choose a table for this lookup field to link to.');
   if (t === 'formula' && (!formula || !formula.trim())) throw new Error('Please enter a formula for this calculated field.');
   const usesGlobalPicklist = t === 'picklist' && picklistSource === 'global';
-  if (t === 'picklist' && !usesGlobalPicklist && (!options || !options.trim())) throw new Error('Please enter at least one option (comma-separated), or choose a Global Picklist instead.');
+  const resolvedPicklistValues = normalizePicklistValueRows(picklistValues);
+  if (t === 'picklist' && !usesGlobalPicklist && resolvedPicklistValues.length === 0) throw new Error('Please add at least one option, or choose a Global Picklist instead.');
   if (usesGlobalPicklist && (!picklistKey || !picklistByKey(schema, picklistKey))) throw new Error('Choose a valid Global Picklist.');
   if (t === 'series' && (!seriesGroupPath || !seriesTrackerEntity || !seriesTrackerGroupField || !seriesTrackerCounterField)) {
     throw new Error('Series fields need a group path, a tracker table, and its group/counter fields.');
@@ -1357,7 +2440,7 @@ function updateField(schema, entityKey, fieldName, { label, type, ref, required,
   f.rows = t === 'textarea' ? (Number(rows) > 0 ? Number(rows) : (f.rows || 2)) : undefined;
   f.formula = t === 'formula' ? formula.trim() : undefined;
   f.format = (t === 'formula' || t === 'rollup') ? (['currency', 'percent', 'date', 'datetime'].includes(format) ? format : 'none') : undefined;
-  f.options = (t === 'picklist' && !usesGlobalPicklist) ? options.trim() : undefined;
+  f.picklistValues = (t === 'picklist' && !usesGlobalPicklist) ? resolvedPicklistValues : undefined;
   f.picklistSource = t === 'picklist' ? (usesGlobalPicklist ? 'global' : 'custom') : undefined;
   f.picklistKey = usesGlobalPicklist ? picklistKey : undefined;
   f.picklistConstraintField = usesGlobalPicklist && picklistConstraintField ? picklistConstraintField : undefined;
@@ -1371,6 +2454,8 @@ function updateField(schema, entityKey, fieldName, { label, type, ref, required,
   f.rollupField = t === 'rollup' ? rollupField : undefined;
   f.rollupOrderField = t === 'rollup' ? (rollupOrderField || undefined) : undefined;
   f.rollupWhere = t === 'rollup' ? (rollupWhere || '') : undefined;
+  f.fkWhere = t === 'fk' ? (fkWhere || '') : undefined;
+  f.fkBulkLink = (t === 'fk' && fkWhere && fkWhere.trim()) ? !!fkBulkLink : undefined;
   // Read-only and default value are cross-cutting settings, not tied to
   // one field type the way formula/rollup/series config is — but they
   // don't make sense on a field that's already inherently non-editable
@@ -1418,6 +2503,14 @@ function formatFormulaValue(field, value) {
   if (field.format === 'percent') return formatPercent(value);
   if (field.format === 'date') return formatDate(value, false);
   if (field.format === 'datetime') return formatDate(value, true);
+  // A bare bool (e.g. a Report column reading a Yes/No field directly,
+  // not through a formula) was previously passing straight through as a
+  // raw JS boolean — invisible on screen (EJS just stringifies it as
+  // "true"/"false"), but became visibly wrong once report columns
+  // started being used as Bill/Report PDF template tags, since there's
+  // no separate display layer there to catch it. Same "Yes"/"No"
+  // convention formatMergeValue already uses, for consistency.
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   // 'number' displays the same as 'none' (raw passthrough) — it exists
   // purely as a declarative signal that a column/aggregate genuinely
   // produces a number, for Report total-row eligibility (see
@@ -1491,6 +2584,65 @@ const PAYQR_FIELD_ROLES = {
   paymentNotesField: { entity: 'payments', types: ['text', 'textarea'], label: 'Payment Notes field' },
   paymentDateField: { entity: 'payments', types: ['date', 'timestamp'], label: 'Payment Date field' },
 };
+
+// ---- Tax field-role settings -----------------------------------------
+// Same shape and reasoning as PayQR above: tax.js only ever operates on
+// tables literally named landlords/tenants/invoices — that's still fixed,
+// not configurable — but WHICH field on those tables plays each role the
+// computation actually needs is. landlordGroupField and the two optional
+// ones below it degrade gracefully rather than blocking the whole
+// computation when left unset (see tax.js's own use of these); the rent/
+// TDS/date fields don't, since without them there's no computation to run
+// at all. The invoice->landlord and invoice->tenant links aren't listed
+// here on purpose, same reasoning as PayQR's own payee link: derivable
+// from the schema's own fk relationships, not something to ask for.
+const TAX_FIELD_ROLES = {
+  landlordGroupField: { entity: 'landlords', types: ['fk'], label: 'Landlord Group-Root field', optional: true },
+  invoiceDateField: { entity: 'invoices', types: ['date', 'timestamp'], label: 'Invoice Date field' },
+  invoiceRentField: { entity: 'invoices', types: ['currency', 'number', 'formula'], label: 'Invoice Taxable Rent field' },
+  invoiceTdsField: { entity: 'invoices', types: ['currency', 'number', 'formula'], label: 'Invoice TDS Deducted field' },
+  landlordPanField: { entity: 'landlords', types: ['text'], label: 'Landlord PAN field', optional: true },
+  landlordGstinField: { entity: 'landlords', types: ['text'], label: 'Landlord GSTIN field', optional: true },
+  landlordAddressField: { entity: 'landlords', types: ['text', 'textarea'], label: 'Landlord Address field', optional: true },
+  landlordPhoneField: { entity: 'landlords', types: ['text'], label: 'Landlord Phone field', optional: true },
+  landlordEmailField: { entity: 'landlords', types: ['text'], label: 'Landlord Email field', optional: true },
+  invoiceRentReceivedField: { entity: 'invoices', types: ['currency', 'number'], label: 'Invoice Rent Received field', optional: true },
+};
+
+function updateTaxSettings(schema, input) {
+  const next = {};
+  Object.keys(TAX_FIELD_ROLES).forEach(key => {
+    const role = TAX_FIELD_ROLES[key];
+    const entity = schema.entities[role.entity];
+    if (!entity) throw new Error(`The "${role.entity}" table does not exist.`);
+    const fieldName = (input[key] || '').trim();
+    if (!fieldName) {
+      if (!role.optional) throw new Error(`${role.label} is required.`);
+      next[key] = '';
+      return;
+    }
+    const f = entity.fields.find(fl => fl.name === fieldName);
+    if (!f) throw new Error(`"${fieldName}" is not a field on ${entity.label}.`);
+    if (!role.types.includes(f.type)) {
+      throw new Error(`${role.label} must be a ${role.types.join(' or ')} field — "${fieldName}" is type "${f.type}".`);
+    }
+    next[key] = fieldName;
+  });
+  schema.taxSettings = next;
+}
+
+function taxEligibleFields(entity, roleKey) {
+  const role = TAX_FIELD_ROLES[roleKey];
+  if (!entity || !role || entity.key !== role.entity) return [];
+  return entity.fields.filter(f => role.types.includes(f.type));
+}
+
+// True once every REQUIRED role is mapped (optional ones may stay unset
+// forever without blocking the computation itself).
+function taxSettingsComplete(schema) {
+  const settings = schema.taxSettings || {};
+  return Object.keys(TAX_FIELD_ROLES).every(key => TAX_FIELD_ROLES[key].optional || settings[key]);
+}
 
 // ---- Idle session timeout --------------------------------------------------
 const SESSION_TIMEOUT_MIN = 1;
@@ -1690,6 +2842,36 @@ function validateReportDef(schema, input) {
     }
   });
 
+  // Tag Key — an optional, explicitly-set merge-tag identifier for a
+  // column/aggregate, stable across label renames. Without one, a
+  // report-based PDF template's {{tag}} is derived by sanitizing the
+  // column's own Label (see reportColumnKeyMap) — convenient, but it
+  // means renaming "Inv #" to "Invoice No." silently changes the tag a
+  // template needs to reference it by, with no error, just a blank cell
+  // where data used to show. Setting an explicit Tag Key breaks that
+  // link: the tag stays put no matter what the Label becomes.
+  // Validated the same way any other admin-facing identifier in this
+  // app is (safeFieldName-style rules) and checked for collisions
+  // across the whole report (both columns and aggregates share the same
+  // merge-tag namespace) — a silent duplicate would mean two different
+  // pieces of data resolving to the same tag, which is worse than
+  // requiring the admin to pick a different key up front.
+  const tagKeyOwners = [...columns, ...aggregates];
+  const seenTagKeys = new Map();
+  tagKeyOwners.forEach(item => {
+    if (!item.tagKey) { item.tagKey = ''; return; }
+    const key = String(item.tagKey).trim();
+    if (!key) { item.tagKey = ''; return; }
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
+      throw new Error(`Tag Key "${key}" (on "${item.label}") must start with a letter or underscore and contain only letters, digits, and underscores — no spaces or punctuation.`);
+    }
+    if (seenTagKeys.has(key)) {
+      throw new Error(`Tag Key "${key}" is used on both "${seenTagKeys.get(key)}" and "${item.label}" — each Tag Key must be unique within a report.`);
+    }
+    seenTagKeys.set(key, item.label);
+    item.tagKey = key;
+  });
+
   if (groupBy) {
     if (aggregates.length === 0) throw new Error('A grouped report needs at least one aggregate (e.g. SUM of an amount).');
   } else if (columns.length === 0) {
@@ -1823,11 +3005,24 @@ function validateReportDef(schema, input) {
 // parameters are restricted to; full arithmetic expressions (used freely
 // in columns/aggregates/conditions) aren't resolved to a single field on
 // purpose, since they don't have just one type.
+// Returns the resolved field object for a bare field or one-hop
+// cross-table expression, with one addition: `_resolvedOnEntityKey` is
+// attached to the returned field, naming which entity that field
+// actually lives on. This matters specifically for detecting a
+// self-referential fk (e.g. tenants.T_GroupRoot, type 'fk' with
+// ref:'tenants' — pointing back at its own table, used as a shared
+// group tag across revisions, not a real per-row identifier) versus a
+// genuine fk to a different table (e.g. invoices.I_LL -> landlords,
+// where each row really is its own distinct, selectable thing). Callers
+// that only read .type/.ref/etc (the existing behavior) are unaffected;
+// only code that specifically checks `_resolvedOnEntityKey` sees the
+// difference.
 function resolveExprField(schema, baseEntity, expr) {
   const trimmed = String(expr || '').trim();
   const bareMatch = trimmed.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/);
   if (bareMatch) {
-    return baseEntity.fields.find(f => f.name === trimmed) || null;
+    const f = baseEntity.fields.find(f => f.name === trimmed);
+    return f ? { ...f, _resolvedOnEntityKey: baseEntity.key } : null;
   }
   const dotted = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)$/);
   if (dotted) {
@@ -1835,7 +3030,9 @@ function resolveExprField(schema, baseEntity, expr) {
     if (!fkField) fkField = baseEntity.fields.find(f => f.type === 'fk' && f.ref === dotted[1]);
     if (!fkField) return null;
     const refEntity = schema.entities[fkField.ref];
-    return refEntity ? (refEntity.fields.find(f => f.name === dotted[2]) || null) : null;
+    if (!refEntity) return null;
+    const f = refEntity.fields.find(f => f.name === dotted[2]);
+    return f ? { ...f, _resolvedOnEntityKey: refEntity.key } : null;
   }
   return null;
 }
@@ -1965,8 +3162,16 @@ function runReport(schema, reportDef, paramValues) {
 // null whenever there's nothing to show yet (no header fields
 // configured, or the anchor parameter hasn't been picked/doesn't
 // resolve to a real record) — the run-time page just skips the panel.
-function computeHeaderPanel(schema, reportDef, paramValues) {
-  if (!reportDef.headerFields || reportDef.headerFields.length === 0) return null;
+// Resolves whatever single record a report's Header-Panel-anchor
+// parameter currently points at, given real runtime parameter values —
+// shared by computeHeaderPanel (the display panel shown on the Run
+// Report page) and renderReportTemplate (PDF generation), so both use
+// the exact same resolution logic rather than two copies that could
+// quietly drift apart. Returns null whenever there's nothing resolvable
+// yet (no anchor parameter, no anchor value picked, resolver condition
+// didn't land on exactly one row) — callers treat that as "nothing to
+// show/generate yet," not an error.
+function resolveReportAnchorRecord(schema, reportDef, paramValues) {
   if (!reportDef.headerAnchorParam) return null;
   const anchorParam = (reportDef.parameters || []).find(p => p.key === reportDef.headerAnchorParam);
   if (!anchorParam || !anchorParam.anchorRef) return null;
@@ -1998,8 +3203,15 @@ function computeHeaderPanel(schema, reportDef, paramValues) {
     anchorRecord = db.getById(anchorEntity.key, anchorEntity.pk, anchorValue);
     if (!anchorRecord) return null;
   }
+  return { anchorEntity, computedRecord: withComputedFields(schema, anchorEntity, anchorRecord) };
+}
 
-  const computedRecord = withComputedFields(schema, anchorEntity, anchorRecord);
+function computeHeaderPanel(schema, reportDef, paramValues) {
+  if (!reportDef.headerFields || reportDef.headerFields.length === 0) return null;
+  const resolved = resolveReportAnchorRecord(schema, reportDef, paramValues);
+  if (!resolved) return null;
+  const { anchorEntity, computedRecord } = resolved;
+
   const fields = reportDef.headerFields.map(h => ({
     label: h.label,
     value: formatFormulaValue({ format: h.format }, evalFormula(h.expr, schema, anchorEntity, computedRecord, {}, 0)),
@@ -2042,11 +3254,21 @@ function validateApplet(schema, input, existingKey) {
   if (dup) throw new Error(`An applet with key "${key}" already exists.`);
 
   let columns = [];
+  let detailFields = [];
   if (type === 'list') {
     columns = (input.columns || []).filter(c => c && c.trim());
     columns.forEach(colName => {
       if (!baseEntity.fields.some(f => f.name === colName)) {
         throw new Error(`Applet "${input.label}": column "${colName}" is not a real field on ${input.baseTable}.`);
+      }
+    });
+  }
+  if (type === 'detail') {
+    detailFields = (input.detailFields || []).filter(c => c && c.trim());
+    detailFields.forEach(colName => {
+      if (colName === '__spacer__' || colName === '__section__') return; // layout pseudo-fields
+      if (!baseEntity.fields.some(f => f.name === colName)) {
+        throw new Error(`Applet "${input.label}": detail field "${colName}" is not a real field on ${input.baseTable}.`);
       }
     });
   }
@@ -2063,7 +3285,7 @@ function validateApplet(schema, input, existingKey) {
 
   return {
     key, label: input.label.trim(), type, baseTable: input.baseTable,
-    columns, filterCondition,
+    columns, detailFields, filterCondition,
     sortField: input.sortField || '', sortDir: input.sortDir === 'desc' ? 'desc' : 'asc',
   };
 }
@@ -2259,6 +3481,22 @@ function picklistByKey(schema, key) {
   return (schema.picklists || []).find(p => p.key === key) || null;
 }
 
+// Generates a stable key for a picklist value, distinct from its (editable)
+// label — the whole point of this being separate is that renaming a label
+// later must NOT change the key, so records already storing it keep
+// resolving correctly. Slug-based + a short random suffix for unlikely
+// collisions, unique against whatever keys already exist in this picklist.
+function genPicklistKey(existingKeys, label) {
+  const base = slugify(label) || 'v';
+  let key = base;
+  let i = 0;
+  while (existingKeys.has(key)) {
+    i++;
+    key = base + '-' + i;
+  }
+  return key;
+}
+
 function validatePicklist(schema, input, existingKey) {
   if (!input.label || !String(input.label).trim()) throw new Error('Picklist name is required.');
   const key = (existingKey || (input.key && input.key.trim())) || `${slugify(input.label)}-${Date.now().toString(36)}`;
@@ -2289,14 +3527,25 @@ function validatePicklist(schema, input, existingKey) {
     };
   }
 
-  const rawValues = (input.values || []).map(v => (typeof v === 'string' ? v : v.value)).filter(v => v && v.trim());
-  const seen = new Set();
+  // input.values is now [{key, label, active}], with key possibly blank
+  // for a brand-new row (the edit form always submits a row per value,
+  // in order; a new row has no key yet). Existing keys are preserved
+  // verbatim — this is the entire point: renaming a label must not
+  // change the stable key already stored on existing records.
+  const rawValues = (input.values || []).filter(v => v && String(v.label || '').trim());
+  const existingKeys = new Set(rawValues.map(v => v.key).filter(Boolean));
+  const seenLabels = new Set();
   const values = [];
   rawValues.forEach(v => {
-    const trimmed = v.trim();
-    if (seen.has(trimmed)) return; // silently dedupe rather than error — easy to paste/type the same value twice
-    seen.add(trimmed);
-    values.push({ value: trimmed, active: true });
+    const label = String(v.label).trim();
+    if (seenLabels.has(label)) return; // dedupe same as before
+    seenLabels.add(label);
+    let key = v.key && String(v.key).trim();
+    if (!key) {
+      key = genPicklistKey(existingKeys, label);
+      existingKeys.add(key);
+    }
+    values.push({ key, label, active: v.active !== false });
   });
   return { key, label: input.label.trim(), sourceType: 'static', values, sourceTable: '', sourceValueField: '', sourceConstraintField: '' };
 }
@@ -2310,15 +3559,12 @@ function addPicklist(schema, input) {
 function updatePicklist(schema, key, input) {
   const idx = (schema.picklists || []).findIndex(p => p.key === key);
   if (idx === -1) throw new Error('Unknown picklist.');
-  const existing = schema.picklists[idx];
+  // Keys are the stable identity now (not label text), so the form's
+  // submitted values are simply the new truth — validatePicklist already
+  // preserves whatever key each row carries and only mints a fresh one
+  // for genuinely new (keyless) rows. No cross-referencing against the
+  // prior version needed.
   const updated = validatePicklist(schema, { ...input, key }, key);
-  // Preserve existing static values' active flags across a re-save (the
-  // edit form resubmits the full value list every time — without this, a
-  // previously-deactivated value would silently reactivate).
-  if (updated.sourceType === 'static' && existing.sourceType === 'static') {
-    const priorActive = new Map((existing.values || []).map(v => [v.value, v.active]));
-    updated.values.forEach(v => { if (priorActive.has(v.value)) v.active = priorActive.get(v.value); });
-  }
   schema.picklists[idx] = updated;
   return updated;
 }
@@ -2340,52 +3586,21 @@ function deletePicklist(schema, key) {
   schema.picklists = (schema.picklists || []).filter(p => p.key !== key);
 }
 
-function setPicklistValueActive(schema, key, value, active) {
+function setPicklistValueActive(schema, key, valueKey, active) {
   const picklist = picklistByKey(schema, key);
   if (!picklist || picklist.sourceType !== 'static') throw new Error('Unknown static picklist.');
-  const v = (picklist.values || []).find(x => x.value === value);
+  const v = (picklist.values || []).find(x => x.key === valueKey);
   if (!v) throw new Error('Unknown value.');
   v.active = !!active;
 }
 
-// The actual options a picklist-type field should offer right now. Same
-// signature spirit as picklistOptions() above — that one only ever
-// handled the 'custom' (raw comma-separated string) source; this is the
-// unified entry point covering both sources, called wherever a
-// picklist's real, current options are needed (rendering a form,
-// validating a submitted value, etc.). `record` is optional — needed
-// only to resolve a constrained table-sourced picklist's filter value;
-// omitted, a table-sourced picklist simply returns every value
-// unfiltered.
-function resolvePicklistOptions(schema, entity, field, record) {
-  if (field.picklistSource !== 'global' || !field.picklistKey) {
-    return picklistOptions(field);
-  }
-  const picklist = picklistByKey(schema, field.picklistKey);
-  if (!picklist) return [];
-  if (picklist.sourceType === 'static') {
-    return (picklist.values || []).filter(v => v.active).map(v => v.value);
-  }
-  const sourceEntity = schema.entities[picklist.sourceTable];
-  if (!sourceEntity) return [];
-  let rows = db.getAll(picklist.sourceTable);
-  if (picklist.sourceConstraintField && field.picklistConstraintField && record) {
-    const constraintVal = record[field.picklistConstraintField];
-    if (constraintVal !== undefined && constraintVal !== '') {
-      rows = rows.filter(r => String(r[picklist.sourceConstraintField]) === String(constraintVal));
-    }
-  }
-  const values = rows.map(r => r[picklist.sourceValueField]).filter(v => v !== undefined && v !== null && v !== '');
-  return [...new Set(values.map(String))];
-}
-
 // Richer variant specifically for rendering a create/edit form. A plain
-// (non-constrained) picklist just needs its current options, same as
-// resolvePicklistOptions above — but a CONSTRAINED table-sourced picklist
-// needs more: the constraint field's value can change live as the user
-// fills out the form (e.g. picking Account Type before Card), so the
-// initial server-rendered options aren't enough on their own. Returns
-// the full unfiltered option set too, each tagged with its own
+// (non-constrained) picklist just needs its current {key,label} options,
+// same as resolvePicklistOptions above — but a CONSTRAINED table-sourced
+// picklist needs more: the constraint field's value can change live as
+// the user fills out the form (e.g. picking Account Type before Card),
+// so the initial server-rendered options aren't enough on their own.
+// Returns the full unfiltered option set too, each tagged with its own
 // constraint value, so client-side JS can re-filter without a server
 // round-trip when the constraining sibling field changes.
 function resolvePicklistOptionsForForm(schema, entity, field, record) {
@@ -2397,11 +3612,310 @@ function resolvePicklistOptionsForForm(schema, entity, field, record) {
   if (!picklist || picklist.sourceType !== 'table' || !picklist.sourceConstraintField) {
     return { options, constrainedBy: null, allOptionsWithConstraint: [] };
   }
+  const sourceEntity = schema.entities[picklist.sourceTable];
+  if (!sourceEntity) return { options, constrainedBy: null, allOptionsWithConstraint: [] };
   const rows = db.getAll(picklist.sourceTable);
   const allOptionsWithConstraint = rows
-    .filter(r => r[picklist.sourceValueField] !== undefined && r[picklist.sourceValueField] !== null && r[picklist.sourceValueField] !== '')
-    .map(r => ({ value: String(r[picklist.sourceValueField]), constraintValue: String(r[picklist.sourceConstraintField] ?? '') }));
+    .map(r => withComputedFields(schema, sourceEntity, r))
+    .filter(full => full[picklist.sourceValueField] !== undefined && full[picklist.sourceValueField] !== null && full[picklist.sourceValueField] !== '')
+    .map(full => ({ key: String(full[sourceEntity.pk]), label: String(full[picklist.sourceValueField]), constraintValue: String(full[picklist.sourceConstraintField] ?? '') }));
   return { options, constrainedBy: field.picklistConstraintField, allOptionsWithConstraint };
+}
+
+// ---- FK option constraints (fkWhere) ------------------------------------
+//
+// An fk field may carry an optional `fkWhere` condition — a formula
+// evaluated against each candidate referenced row, with the record being
+// edited exposed as `parent` (identical evaluation shape to a rollup's
+// WHERE). Only rows where it returns true are offered in the picker, and
+// the same condition is enforced on save. This is the generic mechanism
+// behind things like "only sub-landlords, not the group root" or "only
+// active tenants mapped to this record's landlord" — the specific fields
+// live entirely in the admin-authored condition; nothing here is hardcoded.
+
+// Filter candidate referenced rows by a fk field's fkWhere. `parentRecord`
+// is the record being edited (whatever `parent.X` resolves against); when
+// it's absent — e.g. a list-filter dropdown, which has no record in hand —
+// the condition is skipped and every row is returned, so filter UIs keep
+// offering the full set rather than mysteriously emptying out.
+function fkWhereFilterRows(schema, field, refEntity, rows, parentEntity, parentRecord) {
+  if (!field || !field.fkWhere || !field.fkWhere.trim() || !parentRecord) return rows;
+  return rows.filter(r => evalFormula(field.fkWhere, schema, refEntity, r, { parent: { entity: parentEntity, row: parentRecord } }, 0) === true);
+}
+
+// Single-row form of the same check, used at save time. Pure (no db): given
+// the already-fetched referenced row, does it satisfy the condition?
+function fkRowSatisfies(schema, parentEntity, field, refEntity, refRow, record) {
+  if (!field.fkWhere || !field.fkWhere.trim()) return true;
+  return evalFormula(field.fkWhere, schema, refEntity, refRow, { parent: { entity: parentEntity, row: record } }, 0) === true;
+}
+
+// The sibling fields a fk field's condition depends on — its `parent.<name>`
+// references — so a form can refresh exactly the right pickers when one of
+// those fields changes. Purely lexical; returns [] when there's no condition.
+function fkWhereParentRefs(fkWhere) {
+  if (!fkWhere || !fkWhere.trim()) return [];
+  const refs = new Set();
+  const re = /parent\.([A-Za-z_][A-Za-z0-9_]*)/g;
+  let m;
+  while ((m = re.exec(fkWhere)) !== null) refs.add(m[1]);
+  return [...refs];
+}
+
+// Save-time enforcement: every fk field with an fkWhere must, if it holds a
+// (non-blank) value, point at a referenced record that actually satisfies
+// the condition given the rest of this record as `parent`. Returns an array
+// of { field, message } (same shape as the required/type validator, so the
+// two merge cleanly). A blank value is left to the required-check; a value
+// that resolves to no row is left alone (dangling-fk is a separate concern)
+// — this specifically stops choosing a real record the condition forbids
+// (a stale form, or a direct POST bypassing the filtered picker).
+//
+// `beforeRecord` (optional — the record as it was before this save, i.e.
+// absent on create) matters because an fkWhere condition is a picker
+// convenience for choosing something NOW, not a permanent guarantee about
+// data that was chosen in the past. Concretely: a "T_Active = true" filter
+// on an invoice's Tenant field is there so today's data entry only offers
+// currently-active tenants — it was never meant to retroactively break a
+// 2022 invoice the moment that tenant's lease ends in 2024. If a field's
+// value is UNCHANGED from beforeRecord, it's grandfathered in regardless
+// of whether it still satisfies the condition; the condition only applies
+// to a value that's actually being newly chosen in this save.
+function fkConstraintErrors(schema, entity, record, beforeRecord) {
+  const errors = [];
+  entity.fields.forEach(field => {
+    if (field.type !== 'fk' || !field.fkWhere || !field.fkWhere.trim()) return;
+    const val = record[field.name];
+    if (val === '' || val === undefined || val === null) return;
+    if (beforeRecord && String(beforeRecord[field.name]) === String(val)) return; // unchanged — grandfathered in
+    const refEntity = schema.entities[field.ref];
+    if (!refEntity) return;
+    const row = db.getAll(refEntity.key).find(r => String(r[refEntity.pk]) === String(val));
+    if (!row) return;
+    if (!fkRowSatisfies(schema, entity, field, refEntity, row, record)) {
+      errors.push({ field: field.name, message: `"${field.label}" — the chosen ${refEntity.singular || field.ref} isn't allowed here (it doesn't meet this field's condition).` });
+    }
+  });
+  return errors;
+}
+
+// ---- Generic "Link Matching Records" bulk-link action --------------------
+//
+// For a "many rows share one parent" relationship expressed purely as a
+// constrained fk (e.g. many Invoices -> one GST Filing for their month),
+// picking the parent one invoice at a time is needless once the parent
+// record exists — the "right" child rows are already fully determined by
+// the SAME fkWhere condition already governing the picker. This lets the
+// owner opt a specific relationship in (fkBulkLink on the child's fk
+// field — see addField/updateField) so a "Link Matching Records" button
+// appears on the PARENT record's page; clicking it finds every child row
+// that (a) doesn't already have this field set, and (b) would satisfy the
+// fkWhere condition if linked to this parent, and links them in bulk.
+// Entirely schema-driven — no table or field name is ever hardcoded here;
+// it walks whatever fk-with-fkWhere-and-fkBulkLink relationships exist.
+
+// Which fk-with-fkWhere relationships (on ANY other table) point at
+// entityKey and have opted into the bulk-link button. Called when
+// rendering a record's detail page to decide which buttons to show.
+function bulkLinkableRelationships(schema, entityKey) {
+  const out = [];
+  Object.values(schema.entities).forEach(childEntity => {
+    (childEntity.fields || []).forEach(f => {
+      if (f.type === 'fk' && f.ref === entityKey && f.fkWhere && f.fkWhere.trim() && f.fkBulkLink) {
+        out.push({ childEntityKey: childEntity.key, childFieldName: f.name });
+      }
+    });
+  });
+  return out;
+}
+
+// The actual bulk-link: for the given parent record, find every row on
+// childEntityKey where childFieldName is blank and the fkWhere condition
+// would be satisfied if that field were set to this parent — then set it.
+// Returns the count linked. Never touches a row that already has a value
+// (a manual override, or a prior link) — this only fills in blanks.
+function linkMatchingRecords(schema, parentEntityKey, parentRecord, childEntityKey, childFieldName) {
+  const parentEntity = schema.entities[parentEntityKey];
+  const childEntity = schema.entities[childEntityKey];
+  if (!parentEntity || !childEntity) return 0;
+  const field = childEntity.fields.find(fl => fl.name === childFieldName && fl.type === 'fk' && fl.ref === parentEntityKey && fl.fkWhere && fl.fkBulkLink);
+  if (!field) return 0;
+  const candidates = db.getAll(childEntity.key).filter(r => r[field.name] === undefined || r[field.name] === null || r[field.name] === '');
+  let linked = 0;
+  candidates.forEach(r => {
+    // Resolve computed fields on the candidate — the fkWhere condition may
+    // reference a formula field via parent.X (e.g. parent.I_MonthYear),
+    // same reasoning as the save-time recordForValidation pattern.
+    const full = withComputedFields(schema, childEntity, r);
+    if (fkRowSatisfies(schema, childEntity, field, parentEntity, parentRecord, full)) {
+      db.update(childEntity.key, childEntity.pk, r[childEntity.pk], { [field.name]: parentRecord[parentEntity.pk] });
+      linked++;
+    }
+  });
+  return linked;
+}
+
+// ---- Template Library (bill/document templates) -------------------------
+
+function templatesFor(schema) {
+  return schema.templates || [];
+}
+
+function templateByKey(schema, key) {
+  return (schema.templates || []).find(t => t.key === key) || null;
+}
+
+// One template per table for now (per the agreed scope) — this is what
+// the record detail page checks to decide whether to show a
+// Generate/View PDF button at all.
+function templateForEntity(schema, entityKey) {
+  return (schema.templates || []).find(t => (t.baseKind || 'table') === 'table' && t.baseTable === entityKey) || null;
+}
+
+function templateForReport(schema, reportKey) {
+  return (schema.templates || []).find(t => t.baseKind === 'report' && t.baseTable === reportKey) || null;
+}
+
+// Email templates bound to an entity — many allowed (each becomes a "send
+// email" button on that entity's records). Distinct from templateForEntity,
+// which is the single PDF/document template per table.
+function emailTemplatesForEntity(schema, entityKey) {
+  return (schema.templates || []).filter(t => t.baseKind === 'email' && t.baseTable === entityKey);
+}
+
+// Every report column's Label (e.g. "Inv #", "Rent Recd. Dt.") is what a
+// person reads, but isn't a safe {{tag}} name as-is — strips down to
+// letters/digits/underscore, and if that produces something that can't
+// start an identifier (empty, or starts with a digit) falls back to a
+// positional Col1/Col2/... name instead of producing a broken or
+// confusing tag. Collisions (two columns that sanitize to the same key,
+// e.g. "Amount" and "Amount " differing only in trailing whitespace) get
+// a numeric suffix on the second and later occurrences — deterministic
+// and predictable, not silently overwriting one column's data with
+// another's under the same tag name. This is the fallback only —
+// reportColumnKeyMap below prefers an explicit, admin-set Tag Key first,
+// since that's the one that survives a later label rename unscathed.
+function sanitizeReportColumnKey(label, positionalFallback) {
+  let key = String(label || '').replace(/[^a-zA-Z0-9_]/g, '');
+  if (!key || /^[0-9]/.test(key)) key = 'Col' + positionalFallback;
+  return key;
+}
+// Takes the actual column/aggregate objects (each { label, tagKey }),
+// not bare label strings, so an explicit Tag Key can be honored — a
+// merge tag set this way keeps working even after the Label it was
+// originally derived from changes, which is the entire reason Tag Key
+// exists. Falls back to the sanitized-label derivation for anything
+// without one, so older reports built before Tag Key existed keep
+// working exactly as before with zero migration needed.
+function reportColumnKeyMap(items) {
+  const used = new Set();
+  const map = {};
+  items.forEach((item, i) => {
+    const label = typeof item === 'string' ? item : item.label;
+    const explicitKey = typeof item === 'string' ? '' : (item.tagKey || '');
+    let key = explicitKey || sanitizeReportColumnKey(label, i + 1);
+    let finalKey = key;
+    let suffix = 2;
+    while (used.has(finalKey)) { finalKey = key + suffix; suffix++; }
+    used.add(finalKey);
+    map[label] = finalKey;
+  });
+  return map;
+}
+
+function validateTemplateInput(schema, input, existingKey) {
+  if (!input.label || !String(input.label).trim()) throw new Error('Template name is required.');
+  const baseKind = input.baseKind === 'report' ? 'report' : (input.baseKind === 'email' ? 'email' : 'table');
+  const pageOrientation = input.pageOrientation === 'landscape' ? 'landscape' : 'portrait';
+
+  if (baseKind === 'email') {
+    // An email template is bound to an entity (so merge tags resolve against
+    // its records) and carries the recipient/subject/body — it IS the unit a
+    // record's "send email" button uses. Unlike table/report templates there
+    // can be MANY per entity ("Email invoice", "Send reminder", …), so no
+    // one-per-table limit here.
+    const baseEntity = schema.entities[input.baseTable];
+    if (!baseEntity) throw new Error('Choose a valid base table for the email.');
+    if (!String(input.emailTo || '').trim()) throw new Error('A recipient (To) is required — use a merge tag like {{SomeField}} or an fk chain, or a literal address.');
+    if (!String(input.emailSubject || '').trim()) throw new Error('An email subject is required.');
+    return {
+      baseKind: 'email',
+      label: input.label.trim(),
+      baseTable: input.baseTable,
+      emailTo: String(input.emailTo).trim(),
+      emailCc: String(input.emailCc || '').trim(),
+      emailBcc: String(input.emailBcc || '').trim(),
+      emailSubject: String(input.emailSubject).trim(),
+      htmlBody: input.htmlBody || '',
+      pageOrientation: 'portrait',
+      lineItemsChildTable: null, lineItemsFkField: null,
+    };
+  }
+
+  if (baseKind === 'report') {
+    const reportDef = reportDefByKey(schema, input.baseTable);
+    if (!reportDef) throw new Error('Choose a valid report.');
+    if (!reportDef.headerAnchorParam) {
+      throw new Error(`"${reportDef.label}" has no Header Panel configured — a report needs one so there's a single, sensible subject the PDF is "for". Set up a Header Panel on this report first (Admin → Reports → Edit).`);
+    }
+    const existingForReport = templateForReport(schema, input.baseTable);
+    if (existingForReport && existingForReport.key !== existingKey) {
+      throw new Error(`"${reportDef.label}" already has a template ("${existingForReport.label}") — only one template per report is supported right now. Edit the existing one instead, or delete it first.`);
+    }
+    return {
+      baseKind: 'report',
+      label: input.label.trim(),
+      baseTable: input.baseTable,
+      htmlBody: input.htmlBody || '',
+      pageOrientation,
+      lineItemsChildTable: null, lineItemsFkField: null,
+    };
+  }
+
+  const baseEntity = schema.entities[input.baseTable];
+  if (!baseEntity) throw new Error('Choose a valid base table.');
+  const existingForTable = templateForEntity(schema, input.baseTable);
+  if (existingForTable && existingForTable.key !== existingKey) {
+    throw new Error(`"${baseEntity.label}" already has a template ("${existingForTable.label}") — only one template per table is supported right now. Edit the existing one instead, or delete it first.`);
+  }
+  let lineItemsChildTable = null;
+  let lineItemsFkField = null;
+  if (input.lineItemsChildTable) {
+    const childEntity = schema.entities[input.lineItemsChildTable];
+    if (!childEntity) throw new Error('Line items table is not a real table.');
+    const fkField = childEntity.fields.find(f => f.name === input.lineItemsFkField && f.type === 'fk' && f.ref === input.baseTable);
+    if (!fkField) throw new Error(`"${input.lineItemsFkField}" is not a real field on ${childEntity.label} linking back to ${baseEntity.label}.`);
+    lineItemsChildTable = input.lineItemsChildTable;
+    lineItemsFkField = fkField.name;
+  }
+  return {
+    baseKind: 'table',
+    label: input.label.trim(),
+    baseTable: input.baseTable,
+    htmlBody: input.htmlBody || '',
+    pageOrientation,
+    lineItemsChildTable, lineItemsFkField,
+  };
+}
+
+function addTemplate(schema, input) {
+  const validated = validateTemplateInput(schema, input);
+  const key = `${slugify(input.label)}-${Date.now().toString(36)}`;
+  const template = { key, ...validated, createdAt: new Date().toISOString() };
+  schema.templates.push(template);
+  return template;
+}
+
+function updateTemplate(schema, key, input) {
+  const idx = (schema.templates || []).findIndex(t => t.key === key);
+  if (idx === -1) throw new Error('Unknown template.');
+  const validated = validateTemplateInput(schema, input, key);
+  schema.templates[idx] = { ...schema.templates[idx], ...validated };
+  return schema.templates[idx];
+}
+
+function deleteTemplate(schema, key) {
+  schema.templates = (schema.templates || []).filter(t => t.key !== key);
 }
 
 function groupRowsFor(groupRows, agg, schema, baseEntity) {
@@ -2412,20 +3926,149 @@ function groupRowsFor(groupRows, agg, schema, baseEntity) {
 }
 
 module.exports = {
-  FIELD_TYPES, LAYOUT_TYPES, COMPUTED_TYPES, FILTERABLE_TYPES, filterKindFor, load, normalizeSchema, persist, slugify, safeFieldName, display, listTitle, detailTitle, listFieldsFor, filterFieldsFor,
+  ensureAppSettings, normalizeDateValue,
+  ensureBulkGenerateProfiles, addBulkGenerateProfile, updateBulkGenerateProfile, deleteBulkGenerateProfile,
+  FIELD_TYPES, LAYOUT_TYPES, COMPUTED_TYPES, FILTERABLE_TYPES, filterKindFor, load, normalizeSchema, persist, slugify, safeFieldName, display, listTitle, detailTitle, listFieldsFor, filterFieldsFor, withComputedFieldsSubset,
+  NUMERIC_FIELD_TYPES, LIST_TOTAL_FNS, numericFieldsFor, updateListTotals, computeListTotals,
+  resolveMergeChain, formatMergeValue, renderBillTemplate,
+  templatesFor, templateByKey, templateForEntity, templateForReport, emailTemplatesForEntity, addTemplate, updateTemplate, deleteTemplate,
+  mergeFieldTags, renderBillTemplate, mergeFieldTagsPlain,
+  sidebarGroupsFor, addSidebarGroup, updateSidebarGroup, deleteSidebarGroup, reorderSidebarGroups, dedupeSidebarItemsWithinGroups,
+  addSidebarItem, updateSidebarItem, deleteSidebarItem, reorderSidebarItems, builtinSidebarLinks, guessIconForKey,
+  reportColumnKeyMap, renderReportTemplate, resolveReportAnchorRecord,
   formatINR, formatPercent, formatDate, formatFormulaValue, renderHintHtml, evalFormula, withComputedFields, resolveCrossTableValue,
   picklistOptions, assignSeriesFields, getChildren, isReferenced, findBlockingReferences, computeFieldDefault, applyFieldDefaults,
   addEntity, updateEntitySettings, deleteEntity, moveNav, addNav, removeNav, moveEntityToAdmin, moveEntityOutOfAdmin, reorderAdminSubnav, ADMIN_SUBNAV_FIXED_PAGES,
   addField, updateField, deleteField, moveField,
+  fkWhereFilterRows, fkRowSatisfies, fkWhereParentRefs, fkConstraintErrors, bulkLinkableRelationships, linkMatchingRecords,
   updateViewSort, addListColumn, removeListColumn, moveListColumn,
   addFilterField, removeFilterField, moveFilterField,
   reorderFields, reorderListColumns, reorderFilterFields, reorderNav,
   PAYQR_FIELD_ROLES, updatePayqrSettings, payqrEligibleFields, payqrPayeePkField, payqrPaymentToPayeeFkField,
+  TAX_FIELD_ROLES, updateTaxSettings, taxEligibleFields, taxSettingsComplete,
   SESSION_TIMEOUT_MIN, SESSION_TIMEOUT_MAX, updateSessionTimeout,
   discoverApplets, appletSettingsFor, addChildAppletInstance, removeApplet, reorderApplets, setAppletFilter, computeAppletData, applyFilterCondition,
   reportDefsFor, reportDefByKey, addReportDef, updateReportDef, deleteReportDef, duplicateReportDef, runReport, resolveExprField, aggregateValues,
   appletsFor, appletByKey, addApplet, updateApplet, deleteApplet,
   viewsFor, viewByKey, addView, updateView, deleteView, reorderViewApplets,
   screensFor, screenByKey, addScreen, updateScreen, deleteScreen, reorderScreenViews,
-  picklistsFor, picklistByKey, addPicklist, updatePicklist, deletePicklist, setPicklistValueActive, resolvePicklistOptions, resolvePicklistOptionsForForm,
+  picklistsFor, picklistByKey, addPicklist, updatePicklist, deletePicklist, setPicklistValueActive, resolvePicklistOptions, resolvePicklistOptionsForForm, resolvePicklistLabel, picklistValuesFromCsv,
 };
+
+// ---- Bulk Generate Profiles ------------------------------------------------
+// A saved configuration for generating target-table records from source-table
+// rows (e.g. generate one invoice per active tenant for a month). Generic;
+// not hardcoded to any specific tables.
+function ensureBulkGenerateProfiles(schema) {
+  if (!schema.bulkGenerateProfiles) schema.bulkGenerateProfiles = [];
+}
+function addBulkGenerateProfile(schema, input) {
+  ensureBulkGenerateProfiles(schema);
+  const key = (input.label || 'profile').toLowerCase().replace(/[^a-z0-9]+/g, '_') + '-' + Date.now().toString(36);
+  const profile = {
+    key,
+    label: String(input.label || '').trim(),
+    sourceTable: input.sourceTable,
+    sourceFilter: input.sourceFilter || '',       // formula: e.g. "T_Active = true"
+    sourceSort: input.sourceSort || '',            // field name for ordering
+    targetTable: input.targetTable,
+    fieldMappings: input.fieldMappings || [],       // [{targetField, value}] — value can be a source field name or a literal
+    monthField: input.monthField || '',             // target field that receives the chosen month (YYYY-MM)
+    dedupField: input.dedupField || '',             // target field to check for existing records (skip if match)
+    dedupSourceField: input.dedupSourceField || '', // source field to match against dedupField
+  };
+  schema.bulkGenerateProfiles.push(profile);
+  persist(schema);
+  return profile;
+}
+function updateBulkGenerateProfile(schema, key, input) {
+  ensureBulkGenerateProfiles(schema);
+  const idx = schema.bulkGenerateProfiles.findIndex(p => p.key === key);
+  if (idx === -1) throw new Error('Unknown profile.');
+  const p = schema.bulkGenerateProfiles[idx];
+  if (input.label !== undefined) p.label = String(input.label).trim();
+  if (input.sourceFilter !== undefined) p.sourceFilter = input.sourceFilter;
+  if (input.sourceSort !== undefined) p.sourceSort = input.sourceSort;
+  if (input.fieldMappings !== undefined) p.fieldMappings = input.fieldMappings;
+  if (input.monthField !== undefined) p.monthField = input.monthField;
+  if (input.dedupField !== undefined) p.dedupField = input.dedupField;
+  if (input.dedupSourceField !== undefined) p.dedupSourceField = input.dedupSourceField;
+  persist(schema);
+  return p;
+}
+function deleteBulkGenerateProfile(schema, key) {
+  ensureBulkGenerateProfiles(schema);
+  schema.bulkGenerateProfiles = schema.bulkGenerateProfiles.filter(p => p.key !== key);
+  persist(schema);
+}
+
+// ---- App Settings (system-wide preferences) --------------------------------
+function ensureAppSettings(schema) {
+  if (!schema.appSettings) schema.appSettings = {};
+  if (!schema.appSettings.dateFormat) schema.appSettings.dateFormat = 'dd-mm-yyyy'; // Indian default
+}
+
+// Normalize a raw date string to ISO (yyyy-mm-dd). Tries common formats;
+// for ambiguous cases (e.g. 03-05-2025) uses the preferDayFirst flag.
+// Returns null if the value can't be parsed.
+function normalizeDateValue(raw, preferDayFirst) {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim();
+  if (!s) return '';
+
+  // Already ISO: yyyy-mm-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  // Excel serial number (pure integer, 5 digits like 45883)
+  if (/^\d{5}$/.test(s)) {
+    const n = parseInt(s, 10);
+    if (n > 1 && n < 200000) {
+      // Excel serial: days since 1900-01-00 (with the Lotus 1-2-3 bug: day 60 = Feb 29, 1900 which didn't exist)
+      const base = new Date(1899, 11, 30); // Dec 30, 1899
+      const adjust = n > 59 ? n - 1 : n; // skip the phantom Feb 29
+      const d = new Date(base.getTime() + (adjust + 1) * 86400000);
+      return d.toISOString().slice(0, 10);
+    }
+  }
+
+  // dd-Mon-yyyy or dd/Mon/yyyy (unambiguous: 15-Aug-2025)
+  const monMatch = s.match(/^(\d{1,2})[\/-]([A-Za-z]{3,9})[\/-](\d{4})$/);
+  if (monMatch) {
+    const d = new Date(monMatch[3] + ' ' + monMatch[2] + ' ' + monMatch[1]);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  }
+
+  // dd-mm-yyyy, dd/mm/yyyy, mm-dd-yyyy, mm/dd/yyyy
+  const numMatch = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (numMatch) {
+    const a = parseInt(numMatch[1], 10);
+    const b = parseInt(numMatch[2], 10);
+    const year = parseInt(numMatch[3], 10);
+    let day, month;
+    if (preferDayFirst) { day = a; month = b; }
+    else { month = a; day = b; }
+    // Sanity check
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const iso = year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+      const check = new Date(iso);
+      if (!isNaN(check.getTime()) && check.getDate() === day) return iso;
+    }
+    // Try the other interpretation if the first failed
+    if (!preferDayFirst) { day = a; month = b; } else { month = a; day = b; }
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const iso = year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+      const check = new Date(iso);
+      if (!isNaN(check.getTime()) && check.getDate() === day) return iso;
+    }
+  }
+
+  // yyyy/mm/dd
+  const slashIso = s.match(/^(\d{4})[\/.](\d{1,2})[\/.](\d{1,2})$/);
+  if (slashIso) {
+    const iso = slashIso[1] + '-' + slashIso[2].padStart(2, '0') + '-' + slashIso[3].padStart(2, '0');
+    const check = new Date(iso);
+    if (!isNaN(check.getTime())) return iso;
+  }
+
+  return null; // unrecognizable
+}

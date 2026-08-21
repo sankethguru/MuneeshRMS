@@ -1,0 +1,148 @@
+<%- include('partials/head') %>
+<% if (!print) { %><%- include('partials/nav') %><% } %>
+
+<div class="applet-shell tax-sheet <%= print ? 'tax-print' : '' %>">
+  <div class="applet-titlebar">
+    <span class="applet-title">Annexure — <%= display(ll, rootRecord) || group.root %> (<%= group.root %>)</span>
+    <% if (!print) { %>
+    <div class="applet-toolbar">
+      <form method="GET" action="/tax/annexure/<%= encodeURIComponent(group.root) %>" style="display:inline-flex; align-items:center; gap:6px;">
+        <label style="font-size:12px; color:var(--ink-soft);">FY (for the schedules below)</label>
+        <input type="text" name="fy" placeholder="2025-26" value="<%= fySchedules ? fySchedules.fy : '' %>" style="width:80px;">
+        <button class="btn btn-mini" type="submit">Go</button>
+      </form>
+      <a class="btn btn-toolbar" href="/tax/annexure/<%= encodeURIComponent(group.root) %>?print=1<%= fySchedules ? '&fy=' + encodeURIComponent(fySchedules.fy) : '' %>" target="_blank">Print View</a>
+      <a class="btn btn-toolbar" href="/tax_worksheets">Tax Worksheets</a>
+    </div>
+    <% } %>
+  </div>
+
+  <table class="list-table tax-table prose">
+    <thead>
+      <tr class="tax-section"><td colspan="6">1. Landlord Details — all GST registrations in this group</td></tr>
+      <tr><th>Code</th><th>Display Name</th><th>PAN</th><th>GSTIN</th><th>Contact</th><th>Address</th></tr>
+    </thead>
+    <tbody>
+      <% group.members.forEach(function (m) { %>
+        <tr>
+          <td><%= m[ll.pk] %><%= m[ll.pk] === group.root ? ' (root)' : '' %></td>
+          <td><%= display(ll, m) %></td>
+          <td><%= (contactFields.pan && m[contactFields.pan]) || '' %></td>
+          <td><%= (contactFields.gstin && m[contactFields.gstin]) || '' %></td>
+          <td><%= [contactFields.phone && m[contactFields.phone], contactFields.email && m[contactFields.email]].filter(Boolean).join(' / ') %></td>
+          <td><%= (contactFields.address && m[contactFields.address]) || '' %></td>
+        </tr>
+      <% }); %>
+    </tbody>
+  </table>
+
+  <% sections.forEach(function (sec, i) { %>
+    <table class="list-table tax-table prose">
+      <thead>
+        <tr class="tax-section"><td colspan="<%= Math.max(1, sec.fields.length) %>"><%= i + 2 %>. <%= sec.title %><%= sec.discovered ? ' (auto-included)' : '' %></td></tr>
+        <% if (sec.rows.length > 0) { %>
+          <tr><% sec.fields.forEach(function (f) { %><th><%= f.label || f.name %></th><% }); %></tr>
+        <% } %>
+      </thead>
+      <tbody>
+        <% if (sec.rows.length === 0) { %>
+          <tr><td colspan="<%= Math.max(1, sec.fields.length) %>" class="bills-empty">None recorded.</td></tr>
+        <% } %>
+        <% sec.rows.forEach(function (row) { %>
+          <tr><% sec.fields.forEach(function (f) { var val = row[f.name]; %><td><%
+            if (typeof val === 'boolean') { %><%= val ? 'Y' : 'N' %><% }
+            else if (f.type === 'currency') { %><%= formatINR(val) %><% }
+            else if (f.type === 'percent') { %><%= formatPercent(val) %><% }
+            else if (f.type === 'date') { %><%= formatDate(val, false) %><% }
+            else if (f.type === 'formula' || f.type === 'rollup') { %><%= formatFormulaValue(f, val) %><% }
+            else { %><%= val == null ? '' : val %><% } %></td><% }); %></tr>
+        <% }); %>
+      </tbody>
+    </table>
+  <% }); %>
+
+  <% var nextSecNum = sections.length + 2; %>
+  <% if (fySchedules) { %>
+
+    <table class="list-table tax-table prose">
+      <thead>
+        <tr class="tax-section"><td colspan="3"><%= nextSecNum %>. Rental Income by Property — FY <%= fySchedules.fy %></td></tr>
+        <% if (fySchedules.rentPull.byProperty.length > 0) { %><tr><th>Property</th><th style="text-align:right;">Rent (invoices)</th><th style="text-align:right;">Taxable Rent</th></tr><% } %>
+      </thead>
+      <tbody>
+        <% if (fySchedules.rentPull.byProperty.length === 0) { %>
+          <tr><td colspan="3" class="bills-empty"><%= fySchedules.rentPull.available ? 'No invoices this FY.' : 'Rent isn\'t available — check Admin \u2192 Tax Settings.' %></td></tr>
+        <% } %>
+        <% fySchedules.rentPull.byProperty.forEach(function (p) { %>
+          <tr><td><%= p.label %></td><td style="text-align:right;"><%= p.count %></td><td style="text-align:right;"><%= formatINR(p.rent) %></td></tr>
+        <% }); %>
+        <% if (fySchedules.rentPull.byProperty.length > 0) { %>
+          <tr class="tax-sub"><td>Total</td><td style="text-align:right;"><%= fySchedules.rentPull.count + fySchedules.rentPull.osCount %></td><td style="text-align:right;"><%= formatINR(fySchedules.rentPull.grossRent + fySchedules.rentPull.otherSourcesRent) %></td></tr>
+        <% } %>
+      </tbody>
+    </table>
+
+    <table class="list-table tax-table prose">
+      <thead>
+        <tr class="tax-section"><td colspan="4"><%= nextSecNum + 1 %>. TDS by Tenant — FY <%= fySchedules.fy %></td></tr>
+        <% if (fySchedules.rentPull.byTenant.length > 0) { %><tr><th>Tenant</th><th style="text-align:right;">Invoices</th><th style="text-align:right;">Taxable Rent</th><th style="text-align:right;">TDS Deducted</th></tr><% } %>
+      </thead>
+      <tbody>
+        <% if (fySchedules.rentPull.byTenant.length === 0) { %>
+          <tr><td colspan="4" class="bills-empty"><%= fySchedules.rentPull.available ? 'No invoices this FY.' : 'Rent isn\'t available — check Admin \u2192 Tax Settings.' %></td></tr>
+        <% } %>
+        <% fySchedules.rentPull.byTenant.forEach(function (t) { %>
+          <tr><td><%= t.label %></td><td style="text-align:right;"><%= t.count %></td><td style="text-align:right;"><%= formatINR(t.rent) %></td><td style="text-align:right;"><%= formatINR(t.tds) %></td></tr>
+        <% }); %>
+        <% if (fySchedules.rentPull.byTenant.length > 0) { %>
+          <tr class="tax-sub"><td>Total</td><td style="text-align:right;"><%= fySchedules.rentPull.count + fySchedules.rentPull.osCount %></td><td style="text-align:right;"><%= formatINR(fySchedules.rentPull.grossRent + fySchedules.rentPull.otherSourcesRent) %></td><td style="text-align:right;"><%= formatINR(fySchedules.rentPull.rentTds) %></td></tr>
+        <% } %>
+      </tbody>
+    </table>
+
+    <table class="list-table tax-table prose">
+      <thead>
+        <tr class="tax-section"><td colspan="2"><%= nextSecNum + 2 %>. Interest Income by Bank — FY <%= fySchedules.fy %></td></tr>
+        <% if (fySchedules.trackedPull.byBank.length > 0) { %><tr><th>Bank</th><th style="text-align:right;">Interest</th></tr><% } %>
+      </thead>
+      <tbody>
+        <% if (fySchedules.trackedPull.byBank.length === 0) { %>
+          <tr><td colspan="2" class="bills-empty"><%= fySchedules.trackedPull.available ? 'No tracked income this FY.' : 'Not available — no incomeoth/banking table in this schema.' %></td></tr>
+        <% } %>
+        <% fySchedules.trackedPull.byBank.forEach(function (b) { %>
+          <tr><td><%= b.label %></td><td style="text-align:right;"><%= formatINR(b.total) %></td></tr>
+        <% }); %>
+        <% if (fySchedules.trackedPull.byBank.length > 0) { %>
+          <tr class="tax-sub"><td>Total</td><td style="text-align:right;"><%= formatINR(fySchedules.trackedPull.total) %></td></tr>
+        <% } %>
+      </tbody>
+    </table>
+
+    <table class="list-table tax-table prose">
+      <thead>
+        <tr class="tax-section"><td colspan="4"><%= nextSecNum + 3 %>. Advance / Self-Assessment Tax Paid — FY <%= fySchedules.fy %></td></tr>
+        <% if (fySchedules.paymentRows.length > 0) { %><tr><th>Date</th><th>Challan / CIN</th><th>Note</th><th style="text-align:right;">Amount</th></tr><% } %>
+      </thead>
+      <tbody>
+        <% if (fySchedules.paymentRows.length === 0) { %>
+          <tr><td colspan="4" class="bills-empty">None recorded.</td></tr>
+        <% } %>
+        <% fySchedules.paymentRows.forEach(function (p) { %>
+          <tr><td><%= formatDate(p.TP_Date, false) %></td><td><%= p.TP_Challan || '' %></td><td><%= p.TP_Note || '' %></td><td style="text-align:right;"><%= formatINR(p.TP_Amount) %></td></tr>
+        <% }); %>
+        <% if (fySchedules.paymentRows.length > 0) { %>
+          <tr class="tax-sub"><td colspan="3">Total</td><td style="text-align:right;"><%= formatINR(fySchedules.paymentsTotal) %></td></tr>
+        <% } %>
+      </tbody>
+    </table>
+
+  <% } %>
+
+  <div class="tax-disclaimer">
+    Compiled across all landlord records in group <%= group.root %> (<%= group.codes.join(', ') %>).
+    Any future table linked to landlords (e.g. a shares/holdings tracker) will appear here automatically.
+    Generated <%= new Date().toISOString().slice(0,10) %> by Muneesh Legacy.
+  </div>
+</div>
+
+<% if (print) { %><script>window.print();</script></body></html><% } else { %><%- include('partials/foot') %><% } %>

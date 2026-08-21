@@ -1,8 +1,289 @@
 <%- include('partials/head') %>
 <%- include('partials/nav') %>
 
+<%
+// ---- Generic widget column display helper ----
+// Given a source entity, a field definition, and a row value, returns the
+// display-ready string — resolving FK references, picklist keys, formulas,
+// currencies, dates, booleans, etc. the same way list.ejs cells do. Used
+// by every source-table widget below so they all get proper display
+// resolution automatically, for any column the admin picks.
+function widgetCellDisplay(srcEntity, field, row) {
+  if (!field) return '';
+  var val = row[field.name];
+  if (val === undefined || val === null || val === '') return '';
+  if (field.type === 'currency') return formatINR(val);
+  if (field.type === 'percent') return formatPercent(val);
+  if (field.type === 'date') return formatDate(val, false);
+  if (field.type === 'timestamp') return formatDate(val, true);
+  if (field.type === 'bool') return val ? 'Yes' : 'No';
+  if (field.type === 'formula' || field.type === 'rollup') return formatFormulaValue(field, val);
+  if (field.type === 'picklist') return resolvePicklistLabel(schema, srcEntity, field, val);
+  if (field.type === 'fk' && field.ref && schema.entities[field.ref]) {
+    var refE = schema.entities[field.ref];
+    var refRow = db.getByIdActive(field.ref, refE.pk, val);
+    if (refRow) return display(refE, refRow, schema);
+  }
+  return String(val);
+}
+
+// Returns the configured columns for a widget, falling back to the
+// source table's listColumns (the same ones the normal list view shows).
+function widgetColumns(w) {
+  var wt = WIDGET_TYPES[w.type];
+  if (!wt || !wt.sourceTable || !schema.entities[wt.sourceTable]) return [];
+  var srcEntity = schema.entities[wt.sourceTable];
+  var configured = (w.config && w.config.columns && w.config.columns.length) ? w.config.columns : (srcEntity.listColumns || []);
+  return configured.map(function(name) { return srcEntity.fields.find(function(f) { return f.name === name; }); }).filter(Boolean);
+}
+%>
+
+<% if (widgets.length === 0) { %>
 <div class="applet-shell landing-shell">
   <div class="landing-blank"></div>
 </div>
+<% } %>
+
+<% widgets.forEach(function (w) { %>
+
+  <% if (w.type === 'due-soon' && w.data.panel && w.data.panel.items.length > 0) { %>
+    <div class="applet-shell">
+      <div class="applet-titlebar">
+        <span class="applet-title">Due Soon<span class="home-due-count"><%= w.data.panel.items.length %><%= w.data.panel.more > 0 ? '+' : '' %></span></span>
+        <div class="applet-toolbar"><a class="btn btn-toolbar" href="/reminders">All Reminders</a></div>
+      </div>
+      <table class="list-table">
+        <tbody>
+          <% w.data.panel.items.forEach(function (b) { const r = b.reminder, s = b.status; %>
+            <tr class="rem-row-<%= s.state %>">
+              <td style="width:90px"><span class="rem-badge rem-badge-<%= s.state %>"><%= { overdue: 'OVERDUE', due: 'DUE', misconfigured: 'Fix me' }[s.state] %></span></td>
+              <td><a href="/reminders"><%= r.RM_Item %></a></td>
+              <td><%= r.RM_Category %></td>
+              <td><%= s.detail || '' %></td>
+            </tr>
+          <% }); %>
+          <% if (w.data.panel.more > 0) { %>
+            <tr><td colspan="4"><a href="/reminders">&hellip; and <%= w.data.panel.more %> more</a></td></tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'rent-status') { %>
+    <div class="applet-shell">
+      <div class="applet-titlebar"><span class="applet-title">This Month's Rent Status</span></div>
+      <% if (!w.data.available) { %>
+        <p class="admin-help" style="padding:8px 12px;"><%= w.data.reason %></p>
+      <% } else { %>
+        <div class="home-kpi-row">
+          <div class="home-kpi-card">
+            <div class="home-kpi-value"><%= w.data.total %></div>
+            <div class="home-kpi-label">Invoices this month</div>
+          </div>
+          <div class="home-kpi-card <%= w.data.pendingCount > 0 ? 'home-kpi-warn' : 'home-kpi-ok' %>">
+            <div class="home-kpi-value"><%= w.data.receivedCount %> / <%= w.data.total %></div>
+            <div class="home-kpi-label">Received (<%= w.data.pendingCount %> pending)</div>
+          </div>
+          <div class="home-kpi-card">
+            <div class="home-kpi-value"><%= formatINR(w.data.receivedAmount) %></div>
+            <div class="home-kpi-label">Collected of <%= formatINR(w.data.totalAmount) %> billed</div>
+          </div>
+        </div>
+      <% } %>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'tax-alerts') { %>
+    <div class="applet-shell">
+      <div class="applet-titlebar"><span class="applet-title">Tax Filing Alerts &mdash; FY <%= w.data.fy %></span></div>
+      <% if (w.data.missingGroups.length === 0 && w.data.shortfalls.length === 0) { %>
+        <p class="admin-help" style="padding:8px 12px;">Nothing needing attention right now.</p>
+      <% } else { %>
+        <table class="list-table">
+          <tbody>
+            <% w.data.missingGroups.forEach(function (g) { %>
+              <tr><td style="width:90px"><span class="rem-badge rem-badge-due">TODO</span></td><td>No Tax Worksheet yet for landlord group <%= g.root %></td><td><a href="/tax_worksheets/new/form">Create one</a></td></tr>
+            <% }); %>
+            <% w.data.shortfalls.forEach(function (s) { %>
+              <tr><td style="width:90px"><span class="rem-badge rem-badge-overdue">SHORTFALL</span></td><td>Group <%= s.groupRoot %> — advance tax short by <%= formatINR(s.balance) %></td><td><a href="/tax/<%= s.worksheetId %>">Worksheet #<%= s.worksheetId %></a></td></tr>
+            <% }); %>
+          </tbody>
+        </table>
+      <% } %>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'quick-actions' && w.data.items.length > 0) { %>
+    <div class="applet-shell">
+      <div class="applet-titlebar"><span class="applet-title">Quick Actions</span></div>
+      <div class="qa-grid">
+        <% w.data.items.forEach(function (it) { %>
+          <a class="qa-tile" href="/<%= it.key %>/new/form"><span class="qa-tile-plus">+</span><span>New <%= it.label %></span></a>
+        <% }); %>
+      </div>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'kpi-cards' && w.data.cards.length > 0) { %>
+    <div class="applet-shell">
+      <div class="applet-titlebar"><span class="applet-title">Overview</span></div>
+      <div class="home-kpi-row">
+        <% w.data.cards.forEach(function (c) { %>
+          <div class="home-kpi-card">
+            <div class="home-kpi-value"><%= (c.value && c.value.isCurrency) ? formatINR(c.value.amount) : c.value %></div>
+            <div class="home-kpi-label"><%= c.label %></div>
+          </div>
+        <% }); %>
+      </div>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'bills-due') { %>
+    <% var bdCols = widgetColumns(w); var bdEntity = schema.entities['expense_items']; %>
+    <div class="applet-shell">
+      <div class="applet-titlebar"><span class="applet-title">Bills Due</span></div>
+      <% if (!w.data.due || w.data.due.length === 0) { %>
+        <p class="admin-help" style="padding:8px 12px;">Nothing outstanding right now.</p>
+      <% } else { %>
+        <table class="list-table">
+          <thead><tr><% bdCols.forEach(function(f){ %><th><%= f.label %></th><% }); %></tr></thead>
+          <tbody>
+            <% w.data.due.forEach(function (d) { %>
+              <tr class="data-row" style="cursor:pointer;" onclick="location.href='/expense_items/<%= encodeURIComponent(d._id) %>'">
+                <% bdCols.forEach(function(f){ %><td><%= widgetCellDisplay(bdEntity, f, d) %></td><% }); %>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+        <div style="padding:6px 12px;"><a href="/bills">Go to Bills</a></div>
+      <% } %>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'uncleared-cheques' && w.data.count > 0) { %>
+    <% var ucCols = widgetColumns(w); var ucEntity = schema.entities['cheques']; %>
+    <div class="applet-shell">
+      <div class="applet-titlebar">
+        <span class="applet-title">Uncleared Cheques<span class="home-due-count"><%= w.data.count %></span></span>
+        <div class="applet-toolbar"><a class="btn btn-toolbar" href="/cheques">All Cheques</a></div>
+      </div>
+      <table class="list-table">
+        <thead><tr><% ucCols.forEach(function(f){ %><th><%= f.label %></th><% }); %></tr></thead>
+        <tbody>
+          <% w.data.rows.forEach(function (r) { %>
+            <tr class="data-row" style="cursor:pointer;" onclick="location.href='/cheques/<%= encodeURIComponent(r._id) %>'">
+              <% ucCols.forEach(function(f){ %><td><%= widgetCellDisplay(ucEntity, f, r) %></td><% }); %>
+            </tr>
+          <% }); %>
+          <% if (w.data.more > 0) { %><tr><td colspan="<%= ucCols.length %>"><a href="/cheques">&hellip; and <%= w.data.more %> more</a></td></tr><% } %>
+        </tbody>
+      </table>
+      <div style="padding:6px 12px; font-weight:600;">Total: <%= formatINR(w.data.total) %></div>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'cc-bills-due' && w.data.count > 0) { %>
+    <% var ccCols = widgetColumns(w); var ccEntity = schema.entities['cctracker']; %>
+    <div class="applet-shell">
+      <div class="applet-titlebar">
+        <span class="applet-title">Credit Card Bills Due<span class="home-due-count"><%= w.data.count %></span></span>
+        <div class="applet-toolbar"><a class="btn btn-toolbar" href="/cctracker">CC Tracker</a></div>
+      </div>
+      <table class="list-table">
+        <thead><tr><% ccCols.forEach(function(f){ %><th><%= f.label %></th><% }); %></tr></thead>
+        <tbody>
+          <% w.data.rows.forEach(function (r) { %>
+            <tr class="data-row" style="cursor:pointer;" onclick="location.href='/cctracker/<%= encodeURIComponent(r._id) %>'">
+              <% ccCols.forEach(function(f){ %><td><%= widgetCellDisplay(ccEntity, f, r) %></td><% }); %>
+            </tr>
+          <% }); %>
+          <% if (w.data.more > 0) { %><tr><td colspan="<%= ccCols.length %>"><a href="/cctracker">&hellip; and <%= w.data.more %> more</a></td></tr><% } %>
+        </tbody>
+      </table>
+      <div style="padding:6px 12px; font-weight:600;">Total outstanding: <%= formatINR(w.data.total) %></div>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'advance-tax-next-due' && w.data.rows && w.data.rows.length > 0) { %>
+    <% var atCols = widgetColumns(w); var atEntity = schema.entities['tax_projections']; %>
+    <div class="applet-shell">
+      <div class="applet-titlebar"><span class="applet-title">Advance Tax Next-Due<span class="home-due-count"><%= formatINR(w.data.total) %></span></span></div>
+      <table class="list-table">
+        <thead><tr><% atCols.forEach(function(f){ %><th><%= f.label %></th><% }); %></tr></thead>
+        <tbody>
+          <% w.data.rows.forEach(function (r) { %>
+            <tr class="data-row" style="cursor:pointer;" onclick="location.href='/tax-projections/<%= encodeURIComponent(r._id) %>'">
+              <% atCols.forEach(function(f){ %><td><%= widgetCellDisplay(atEntity, f, r) %></td><% }); %>
+            </tr>
+          <% }); %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'recent-activity' && w.data.entries.length > 0) { %>
+    <div class="applet-shell">
+      <div class="applet-titlebar"><span class="applet-title">Recent Activity</span></div>
+      <table class="list-table">
+        <tbody>
+          <% w.data.entries.forEach(function (e) { %>
+            <tr><td style="width:130px"><%= (e.ts||'').slice(0,16).replace('T',' ') %></td><td><%= e.entity %></td><td style="width:70px"><%= e.action %></td><td><%= e.user %></td></tr>
+          <% }); %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'system-health') { %>
+    <div class="applet-shell">
+      <div class="applet-titlebar"><span class="applet-title">System Health</span></div>
+      <div class="home-kpi-row">
+        <div class="home-kpi-card"><div class="home-kpi-value"><%= w.data.cpu.pct %>%</div><div class="home-kpi-label">CPU (<%= w.data.cpu.cores %> cores, load <%= w.data.cpu.load1 %>)</div></div>
+        <div class="home-kpi-card"><div class="home-kpi-value"><%= w.data.ram.pct %>%</div><div class="home-kpi-label">RAM (<%= w.data.ram.usedMB %>/<%= w.data.ram.totalMB %> MB)</div></div>
+        <div class="home-kpi-card"><div class="home-kpi-value"><%= w.data.storage.dataKB %> KB</div><div class="home-kpi-label">Data Storage</div></div>
+        <div class="home-kpi-card <%= w.data.dataHealth.tablesWithIssues > 0 ? 'home-kpi-warn' : 'home-kpi-ok' %>"><div class="home-kpi-value"><%= w.data.dataHealth.totalRows %></div><div class="home-kpi-label"><%= w.data.dataHealth.tables %> tables<%= w.data.dataHealth.tablesWithIssues > 0 ? ', ' + w.data.dataHealth.tablesWithIssues + ' with issues' : '' %></div></div>
+      </div>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'announcement') { %>
+    <div class="applet-shell">
+      <div class="applet-titlebar"><span class="applet-title">Announcement</span></div>
+      <p class="admin-help" style="padding:8px 12px; white-space:pre-wrap;"><%= w.data.text %></p>
+    </div>
+  <% } %>
+
+  <% if (w.type === 'report-card') { %>
+    <div class="applet-shell">
+      <div class="applet-titlebar">
+        <span class="applet-title"><%= w.data.label %></span>
+        <div class="applet-toolbar"><a class="btn btn-toolbar" href="/reports/<%= w.data.key %>">Full Report</a></div>
+      </div>
+      <% if (w.data.result.totals) { %>
+        <div class="home-kpi-row">
+          <% w.data.result.columns.forEach(function (col) { if (!w.data.result.totals[col]) return; %>
+            <div class="home-kpi-card">
+              <div class="home-kpi-value"><%= w.data.result.totals[col] %></div>
+              <div class="home-kpi-label"><%= col %></div>
+            </div>
+          <% }); %>
+        </div>
+      <% } else if (w.data.result.rows.length > 0) { %>
+        <table class="list-table">
+          <thead><tr><% w.data.result.columns.forEach(function (col) { %><th><%= col %></th><% }); %></tr></thead>
+          <tbody>
+            <% w.data.result.rows.slice(0, 8).forEach(function (row) { %>
+              <tr><% w.data.result.columns.forEach(function (col) { %><td><%= row[col] %></td><% }); %></tr>
+            <% }); %>
+          </tbody>
+        </table>
+      <% } else { %>
+        <p class="admin-help" style="padding:8px 12px;">No rows to show right now.</p>
+      <% } %>
+    </div>
+  <% } %>
+
+<% }); %>
 
 <%- include('partials/foot') %>

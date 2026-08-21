@@ -1,0 +1,148 @@
+<%- include('../partials/head') %>
+<%- include('../partials/nav') %>
+<%- include('_subnav', { sub: 'templates' }) %>
+
+<div class="applet-shell">
+  <div class="applet-titlebar">
+    <span class="applet-title">Edit Template: <%= template.label %> <span style="font-weight:400; font-size:12px;">(Report: <%= reportDef.label %>)</span></span>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar btn-mini" href="/admin/templates">&larr; Back to Template Library</a>
+    </div>
+  </div>
+
+  <% if (notice) { %><div class="admin-notice ok"><%= notice %></div><% } %>
+  <% if (error) { %><div class="admin-notice err"><%= error %></div><% } %>
+
+  <p class="admin-help" style="padding:8px 12px;">
+    This template is based on a <strong>Report</strong>, not a table &mdash; three different kinds of tags are
+    available here, matching the three parts of a report's own output: fields on whoever the report's Header
+    Panel is currently anchored to (<code>{{HeaderPanel.X}}</code>), one loop over the report's own result rows
+    (<code>{{#each LineItems}}...{{/each}}</code>), and the report's grand-total row, if it has one
+    (<code>{{Totals.X}}</code>).
+  </p>
+
+  <form method="POST" action="/admin/templates/<%= template.key %>">
+    <input type="hidden" name="label" value="<%= template.label %>">
+    <input type="hidden" name="baseKind" value="report">
+    <input type="hidden" name="baseTable" value="<%= template.baseTable %>">
+
+    <div class="field-grid" style="padding:0 12px;">
+      <div class="field-row">
+        <label class="field-label">Page Orientation</label>
+        <div class="field-value">
+          <select name="pageOrientation">
+            <option value="portrait" <%= template.pageOrientation !== 'landscape' ? 'selected' : '' %>>Portrait</option>
+            <option value="landscape" <%= template.pageOrientation === 'landscape' ? 'selected' : '' %>>Landscape</option>
+          </select>
+          <p class="admin-hint">Landscape gives more horizontal room per row &mdash; worth it once a table has enough columns that Portrait starts wrapping dates and amounts onto multiple lines.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">HTML Body</span></div>
+    <div style="display:flex; gap:0; align-items:flex-start;">
+      <div style="flex:1; min-width:0; position:relative; height:520px;">
+        <div id="htmlBodyHighlight" class="editor-highlight-layer" aria-hidden="true"></div>
+        <textarea id="htmlBodyEditor" name="htmlBody" class="editor-textarea" spellcheck="false"><%= template.htmlBody %></textarea>
+      </div>
+      <div style="width:280px; flex-shrink:0; border:1px solid var(--border-dark); border-left:none; height:520px; overflow-y:auto; background:#f8f7f2;">
+        <% if (anchorEntity) { %>
+          <div style="padding:8px 10px; background:#e8e6dc; font-weight:600; font-size:11px; border-bottom:1px solid var(--border-dark);">Header Panel &mdash; <%= anchorEntity.label %> fields</div>
+          <% anchorEntity.fields.filter(function(f){ return f.type !== 'spacer' && f.type !== 'section'; }).forEach(function(f){ %>
+            <div class="field-picker-item" onclick="mlInsertMergeTag('{{HeaderPanel.<%= f.name %>}}')" title="HeaderPanel.<%= f.name %><%= (f.type==='formula'||f.type==='rollup') ? ' (computed)' : '' %>"><%= f.label %></div>
+          <% }); %>
+        <% } %>
+        <% anchorRelatedTrees.forEach(function(rel){ %>
+          <div style="padding:8px 10px; background:#e8e6dc; font-weight:600; font-size:11px; border-bottom:1px solid var(--border-dark); border-top:1px solid var(--border-dark);">Header Panel &mdash; via <%= rel.fkLabel %> (<%= rel.targetEntity.label %>)</div>
+          <% rel.targetEntity.fields.filter(function(f){ return f.type !== 'spacer' && f.type !== 'section'; }).forEach(function(f){ %>
+            <div class="field-picker-item" onclick="mlInsertMergeTag('{{HeaderPanel.<%= rel.fkFieldName %>.<%= f.name %>}}')" title="HeaderPanel.<%= rel.fkFieldName %>.<%= f.name %>"><%= f.label %></div>
+          <% }); %>
+        <% }); %>
+        <div style="padding:8px 10px; background:#e8e6dc; font-weight:600; font-size:11px; border-bottom:1px solid var(--border-dark); border-top:1px solid var(--border-dark);">Line Items &mdash; one report row</div>
+        <% Object.keys(columnKeyMap).forEach(function(label){ %>
+          <div class="field-picker-item" onclick="mlInsertMergeTag('{{<%= columnKeyMap[label] %>}}')" title="<%= columnKeyMap[label] %>"><%= label %></div>
+        <% }); %>
+        <% if (hasTotals) { %>
+          <div style="padding:8px 10px; background:#e8e6dc; font-weight:600; font-size:11px; border-bottom:1px solid var(--border-dark); border-top:1px solid var(--border-dark);">Totals &mdash; the report's grand-total row</div>
+          <% Object.keys(columnKeyMap).forEach(function(label){ %>
+            <div class="field-picker-item" onclick="mlInsertMergeTag('{{Totals.<%= columnKeyMap[label] %>}}')" title="Totals.<%= columnKeyMap[label] %>"><%= label %></div>
+          <% }); %>
+        <% } %>
+        <% if (reportDef.parameters && reportDef.parameters.length) { %>
+          <div style="padding:8px 10px; background:#e8e6dc; font-weight:600; font-size:11px; border-bottom:1px solid var(--border-dark); border-top:1px solid var(--border-dark);">Params &mdash; whatever this report was run with</div>
+          <% reportDef.parameters.forEach(function(p){ %>
+            <div class="field-picker-item" onclick="mlInsertMergeTag('{{Params.<%= p.key %>}}')" title="Params.<%= p.key %>"><%= p.label %></div>
+          <% }); %>
+        <% } %>
+      </div>
+    </div>
+    <style>
+      .editor-highlight-layer, .editor-textarea {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        margin: 0; padding: 10px; box-sizing: border-box;
+        font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.5;
+        white-space: pre-wrap; word-wrap: break-word; overflow: auto;
+        border: 1px solid var(--border-dark);
+      }
+      .editor-highlight-layer { background: var(--white); color: #2a2a2a; pointer-events: none; }
+      .editor-textarea { background: transparent; color: transparent; caret-color: #000; resize: none; }
+      .editor-textarea::selection { background: rgba(60, 120, 220, 0.35); }
+      .merge-tag-highlight { background: #fff2b2; color: #7a5b00; border-radius: 2px; padding: 0 1px; }
+      .merge-tag-each { background: #d6ecff; color: #0a4a80; border-radius: 2px; padding: 0 1px; }
+      .field-picker-item { padding:5px 10px; font-size:12px; cursor:pointer; border-bottom:1px solid #eee; }
+      .field-picker-item:hover { background:var(--gold-soft, #f7ecd5); }
+    </style>
+
+    <div class="form-actions" style="padding:12px;">
+      <button class="btn btn-primary" type="submit">Save Template</button>
+    </div>
+  </form>
+
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Preview</span></div>
+  <p class="admin-help" style="padding:8px 12px 0 12px;">
+    Not available from here &mdash; a report-based template needs the same real parameter values (e.g. which
+    tenant, which financial year) the report itself needs to run. Go to <strong>Reports &rarr; <%= reportDef.label %></strong>,
+    run it with real values, and use <strong>Preview PDF Template</strong> there instead.
+  </p>
+</div>
+
+<script>
+  function mlEscapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function mlRenderHighlight(text) {
+    var escaped = mlEscapeHtml(text);
+    escaped = escaped.replace(/\{\{(#each\s+[\w.]+|\/each)\}\}/g, '<span class="merge-tag-each">{{$1}}</span>');
+    escaped = escaped.replace(/\{\{([\w.]+)\}\}/g, '<span class="merge-tag-highlight">{{$1}}</span>');
+    return escaped + '\n';
+  }
+  function mlUpdateHighlight() {
+    var textarea = document.getElementById('htmlBodyEditor');
+    var layer = document.getElementById('htmlBodyHighlight');
+    layer.innerHTML = mlRenderHighlight(textarea.value);
+  }
+  function mlSyncScroll() {
+    var textarea = document.getElementById('htmlBodyEditor');
+    var layer = document.getElementById('htmlBodyHighlight');
+    layer.scrollTop = textarea.scrollTop;
+    layer.scrollLeft = textarea.scrollLeft;
+  }
+  function mlInsertMergeTag(tag) {
+    var textarea = document.getElementById('htmlBodyEditor');
+    var start = textarea.selectionStart;
+    var end = textarea.selectionEnd;
+    var text = textarea.value;
+    textarea.value = text.substring(0, start) + tag + text.substring(end);
+    textarea.focus();
+    textarea.selectionStart = textarea.selectionEnd = start + tag.length;
+    mlUpdateHighlight();
+  }
+  (function() {
+    var textarea = document.getElementById('htmlBodyEditor');
+    textarea.addEventListener('input', mlUpdateHighlight);
+    textarea.addEventListener('scroll', mlSyncScroll);
+    mlUpdateHighlight();
+  })();
+</script>
+
+<%- include('../partials/foot') %>

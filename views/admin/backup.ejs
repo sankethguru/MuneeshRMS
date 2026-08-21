@@ -13,10 +13,32 @@
   <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Download a Backup</span></div>
   <p class="admin-help">Downloads a ZIP snapshot of everything the app depends on &mdash; the schema (table definitions), all data across every table, all users and permissions, and all uploaded images. Do this before any risky change (bulk imports, structural edits) so you can roll back if needed.</p>
   <div class="form-actions">
-    <a class="btn btn-primary" href="/admin/backup/download">Download Backup ZIP</a>
+    <a class="btn btn-toolbar" href="/admin/backup/download">Download Backup ZIP</a>
     <a class="btn btn-toolbar" href="/admin/backup/download-schema-only">Download Schema Only (no data)</a>
   </div>
   <p class="admin-help">"Schema Only" downloads just the table/field/view structure &mdash; no records, no users, no uploaded images. Useful for iterating on structure in a dev/test install, then pushing that structure onto a separate instance without carrying dev/test data along with it.</p>
+
+  <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Automatic Backups</span></div>
+  <p class="admin-help">A full backup is taken automatically once a day (checked hourly, only actually runs if today's hasn't happened yet), with the last 7 days kept &mdash; so a mistake is never more than a day of loss, even without remembering to click Download above. Stored in the same data volume as everything else, so these survive a container restart too.</p>
+  <% if (scheduledBackups.length === 0) { %>
+    <p class="admin-help"><em>None taken yet &mdash; the first one happens within an hour of this app starting up.</em></p>
+  <% } else { %>
+    <div class="list-table-wrap">
+      <table class="list-table">
+        <thead><tr><th>File</th><th>Taken</th><th>Size</th><th>&nbsp;</th></tr></thead>
+        <tbody>
+          <% scheduledBackups.forEach(function(b, i){ %>
+          <tr class="<%= i % 2 === 0 ? 'row-even' : 'row-odd' %>">
+            <td><code><%= b.filename %></code></td>
+            <td><%= new Date(b.mtime).toISOString().slice(0, 19).replace('T', ' ') %></td>
+            <td><%= Math.round(b.sizeBytes / 1024) %> KB</td>
+            <td><a class="btn btn-mini" href="/admin/backup/scheduled/<%= encodeURIComponent(b.filename) %>">Download</a></td>
+          </tr>
+          <% }); %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
 
   <div class="applet-titlebar applet-titlebar-child"><span class="applet-title">Restore From a Backup</span></div>
   <p class="admin-help"><strong>A full backup ZIP (with db.json) replaces everything</strong> &mdash; all current data, users, and images are overwritten with what's in the ZIP. <strong>A Schema-Only ZIP (no db.json) replaces only the table/field/view structure</strong> &mdash; existing data, users, and uploaded images are left completely untouched. Either way, the previous state is saved to a timestamped folder under <code>data/.bak-&hellip;/</code> first, so you can recover manually if the restore was a mistake. You may need to log in again if the users file changed (full restores only).</p>

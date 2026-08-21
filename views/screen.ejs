@@ -18,16 +18,126 @@
     <p class="admin-help" style="padding:16px 20px;">This screen has no views configured yet.</p>
   <% } %>
 
+  <% if (typeof saveError !== 'undefined' && saveError) { %><div class="admin-notice err" style="margin:10px 0;"><%= saveError %></div><% } %>
+  <% if (typeof saveOk !== 'undefined' && saveOk) { %><div class="admin-notice ok" style="margin:10px 0;">Record saved.</div><% } %>
+
   <% appletBlocks.forEach(function(block){ %>
-    <div class="applet-titlebar applet-titlebar-child"><span class="applet-title"><%= block.applet ? block.applet.label : 'Unknown Applet' %></span></div>
+    <div class="applet-shell child-applet" id="applet-<%= block.instance.instanceKey %>">
+    <div class="applet-titlebar applet-titlebar-child">
+      <span class="applet-title"><%= block.applet ? block.applet.label : 'Unknown Applet' %></span>
+      <% if (block.isDetail && block.detailRecord) { %>
+        <div class="applet-toolbar">
+          <%
+            function navUrl(pk) {
+              var p = new URLSearchParams();
+              p.set('view', activeViewKey);
+              appletBlocks.forEach(function(ab) {
+                if (ab.selectedValue && ab.instance.instanceKey !== block.instance.parentInstanceKey) p.set('selected_' + ab.instance.instanceKey, ab.selectedValue);
+              });
+              p.set('selected_' + block.instance.parentInstanceKey, pk);
+              return '/screens/' + encodeURIComponent(screen.key) + '?' + p.toString();
+            }
+            function deselectUrl() {
+              var p = new URLSearchParams();
+              p.set('view', activeViewKey);
+              appletBlocks.forEach(function(ab) {
+                if (ab.selectedValue && ab.instance.instanceKey !== block.instance.parentInstanceKey) p.set('selected_' + ab.instance.instanceKey, ab.selectedValue);
+              });
+              return '/screens/' + encodeURIComponent(screen.key) + '?' + p.toString();
+            }
+          %>
+          <% if (block.navPrev) { %><a class="btn btn-toolbar btn-nav" href="<%= navUrl(block.navPrev) %>" title="Previous record">&larr;</a><% } else { %><a class="btn btn-toolbar btn-nav" href="#" aria-disabled="true">&larr;</a><% } %>
+          <% if (block.navNext) { %><a class="btn btn-toolbar btn-nav" href="<%= navUrl(block.navNext) %>" title="Next record">&rarr;</a><% } else { %><a class="btn btn-toolbar btn-nav" href="#" aria-disabled="true">&rarr;</a><% } %>
+          <a class="btn btn-toolbar" href="<%= deselectUrl() %>">&larr; Back to List</a>
+          <a class="btn btn-toolbar" href="/admin/<%= block.entity.key %>/fields">Edit Fields</a>
+          <% if (block.canUpdate) { %>
+            <a class="btn btn-toolbar" href="/<%= block.entity.key %>/new/form?duplicateFrom=<%= encodeURIComponent(block.detailRecord[block.entity.pk]) %>" title="Open a new record pre-filled with this one's fields">Duplicate</a>
+          <% } %>
+          <% if (block.canDelete) { %>
+            <form method="POST" action="/<%= block.entity.key %>/<%= encodeURIComponent(block.detailRecord[block.entity.pk]) %>/delete" onsubmit="return confirm('Delete this record permanently?');" style="display:inline">
+              <button class="btn btn-toolbar btn-danger" type="submit">Delete</button>
+            </form>
+          <% } %>
+        </div>
+      <% } %>
+    </div>
 
     <% if (block.error) { %>
       <p class="admin-help" style="padding:8px 20px;color:#a13c3c;"><%= block.error %></p>
-    <% } else if (block.notSupported) { %>
-      <p class="admin-help" style="padding:8px 20px;">Detail-type applets aren't rendered in this build yet &mdash; only List applets are.</p>
+    <% } else if (block.isDetail) { %>
+      <% if (block.detailUnlinked) { %>
+        <p class="admin-help" style="padding:8px 20px;">This detail applet isn't linked to a list yet &mdash; set its <strong>Parent Row</strong> to a list applet above (of the same table) in the view configuration.</p>
+      <% } else if (block.needsParentSelection) { %>
+        <p class="admin-help" style="padding:8px 20px;">Select a record above to see its details here.</p>
+      <% } else if (!block.detailRecord) { %>
+        <p class="admin-help" style="padding:8px 20px;">The selected record could not be found.</p>
+      <% } else { %>
+        <% var isComputed = function(f){ return f.type === 'formula' || f.type === 'rollup' || f.type === 'series'; }; %>
+        <% if (block.canUpdate) { %>
+        <form method="POST" action="/screens/<%= screen.key %>/save/<%= block.entity.key %>/<%= encodeURIComponent(block.detailRecord[block.entity.pk]) %>">
+          <input type="hidden" name="_returnView" value="<%= activeViewKey %>">
+          <% appletBlocks.forEach(function(ab){ if (ab.selectedValue) { %><input type="hidden" name="_sel_<%= ab.instance.instanceKey %>" value="<%= ab.selectedValue %>"><% } }); %>
+        <% } %>
+        <div class="field-grid" style="padding:10px 20px;">
+          <% block.detailFields.forEach(function(f){ var val = block.detailRecord[f.name]; var locked = f.key || isComputed(f); %>
+            <% if (f.type === 'spacer') { %>
+              <div class="field-row spacer-row" aria-hidden="true"></div>
+            <% } else if (f.type === 'section') { %>
+              <div class="field-row section-row"><h4 class="section-header"><%= f.label %></h4></div>
+            <% } else { %>
+            <div class="field-row">
+              <label class="field-label"><%= f.label %><%= f.required ? ' *' : '' %></label>
+              <div class="field-value">
+                <% if (!block.canUpdate || locked) { %>
+                  <% if (isComputed(f)) { %>
+                    <input type="text" class="formula-display" value="<%= formatFormulaValue(f, val) %>" readonly>
+                  <% } else if (typeof val === 'boolean') { %>
+                    <input type="checkbox" disabled <%= val ? 'checked' : '' %>>
+                  <% } else if (f.type === 'picklist') { %>
+                    <input type="text" value="<%= val ? picklistLabel(block.entity, f, val) : '' %>" readonly>
+                  <% } else { %>
+                    <input type="text" value="<%= val != null ? val : '' %>" readonly>
+                  <% } %>
+                <% } else if (f.type === 'bool') { %>
+                  <input type="hidden" name="<%= f.name %>" value="false">
+                  <input type="checkbox" name="<%= f.name %>" value="true" <%= val ? 'checked' : '' %>>
+                <% } else if (f.type === 'date') { %>
+                  <input type="date" name="<%= f.name %>" value="<%= val || '' %>">
+                <% } else if (f.type === 'picklist') { %>
+                  <select name="<%= f.name %>"><option value="">—</option>
+                    <% picklistOptionsFor(block.entity, f).forEach(function(o){ %><option value="<%= o.key %>" <%= val === o.key ? 'selected' : '' %>><%= o.label %></option><% }); %>
+                  </select>
+                <% } else if (f.type === 'fk') { %>
+                  <input type="text" name="<%= f.name %>" value="<%= val || '' %>">
+                <% } else if (f.type === 'currency' || f.type === 'number' || f.type === 'percent') { %>
+                  <input type="number" name="<%= f.name %>" value="<%= val != null ? val : '' %>" step="any">
+                <% } else { %>
+                  <input type="text" name="<%= f.name %>" value="<%= val != null ? val : '' %>">
+                <% } %>
+              </div>
+            </div>
+            <% } %>
+          <% }); %>
+        </div>
+        <% if (block.canUpdate) { %>
+          <div style="padding:8px 20px;"><button class="btn btn-primary" type="submit">Save</button></div>
+        </form>
+        <% } %>
+      <% } %>
     <% } else if (block.needsParentSelection) { %>
       <p class="admin-help" style="padding:8px 20px;">Select a record above to see its related rows here.</p>
-    <% } else { %>
+    <% } else if (!block.isDetail) { %>
+        <div style="padding:6px 16px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <% if (block.canCreate) { %><a class="btn btn-toolbar" href="/<%= block.entity.key %>/new/form">+ New Record</a><% } %>
+          <a class="btn btn-toolbar" href="/admin/<%= block.entity.key %>/fields">Edit Fields</a>
+        </div>
+        <div class="query-bar" style="margin:0;">
+          <label>Query:</label>
+          <input type="text" class="screen-list-search" data-applet-id="<%= block.instance.instanceKey %>" placeholder="Type to filter across visible columns and press Enter&hellip;" autocomplete="off">
+          <button class="btn btn-query" type="button" onclick="this.previousElementSibling.dispatchEvent(new Event('input'))">Go</button>
+          <button class="btn btn-query" type="button" onclick="var inp=this.parentElement.querySelector('.screen-list-search');inp.value='';inp.dispatchEvent(new Event('input'));">Clear</button>
+          <span class="query-count"><%= block.rows.length %> record<%= block.rows.length === 1 ? '' : 's' %></span>
+        </div>
       <div class="list-table-wrap">
         <table class="list-table">
           <thead>
@@ -67,6 +177,7 @@
         </table>
       </div>
     <% } %>
+    </div>
   <% }); %>
 </div>
 

@@ -42,6 +42,7 @@ a:hover { text-decoration: underline; }
 
 /* ---------- Masthead ---------- */
 .masthead {
+  position: sticky; top: 0; z-index: 100;
   background: linear-gradient(180deg, var(--navy-1) 0%, var(--navy-2) 65%, var(--navy-3) 100%);
   color: #f4efe3;
   padding: 10px 18px 12px 18px;
@@ -54,6 +55,20 @@ a:hover { text-decoration: underline; }
 .masthead-brand { display: flex; align-items: baseline; gap: 10px; }
 .masthead-right { display: flex; align-items: center; gap: 10px; }
 .masthead-user { font-size: 11px; color: #dfe6f0; font-weight: 500; letter-spacing: 0.3px; }
+/* Matches .query-bar input[type="text"] (the List screen's own Query
+   box) exactly, per direct request — this was previously unstyled
+   beyond its inline layout rules, falling back to bare browser-default
+   text rendering instead of the app's own look. */
+.masthead-search input {
+  width: 100%;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-dark);
+  border-radius: 2px;
+  box-shadow: inset 1px 1px 2px rgba(0,0,0,0.15);
+  background: var(--white);
+}
 .brand-mark {
   font-family: 'Cormorant Garamond', serif;
   font-weight: 600;
@@ -81,35 +96,50 @@ a:hover { text-decoration: underline; }
   color: #b9c4d6;
 }
 
-/* ---------- Screen tabs ---------- */
-.screen-tabs {
-  display: flex;
-  background: var(--chrome-bg-dark);
-  border-bottom: 1px solid var(--border-dark);
-  padding: 6px 12px 0 12px;
-  gap: 3px;
+/* ---------- App shell: sidebar + main column ---------- */
+.app-shell { display: flex; align-items: stretch; min-height: calc(100vh - 62px); }
+.sidebar {
+  width: 208px; flex-shrink: 0; background: linear-gradient(180deg, var(--navy-1) 0%, var(--navy-2) 100%);
+  display: flex; flex-direction: column; padding: 10px 0; overflow-y: auto;
+  position: sticky; top: 50px; height: calc(100vh - 50px); align-self: flex-start;
 }
-.screen-tab {
-  font-family: 'DM Sans', sans-serif;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--ink-soft);
-  padding: 7px 18px 8px 18px;
-  background: linear-gradient(180deg, #e8e6dc 0%, #d2cfc2 100%);
-  border: 1px solid var(--border-dark);
-  border-bottom: none;
-  border-radius: 4px 4px 0 0;
-  position: relative;
-  top: 1px;
-  text-decoration: none;
+.sidebar-toggle {
+  background: none; border: none; color: #f4efe3; font-size: 18px; cursor: pointer; padding: 2px 4px; margin-right: 2px;
+  border-radius: 3px; line-height: 1;
 }
-.screen-tab:hover { background: #efedE4; text-decoration: none; }
-.screen-tab.active {
-  background: var(--panel-bg);
-  color: var(--navy-2);
-  font-weight: 600;
-  border-bottom: 1px solid var(--panel-bg);
+.sidebar-toggle:hover { background: rgba(255,255,255,0.1); }
+
+.side-link {
+  display: flex; align-items: center; gap: 10px; padding: 7px 16px; font-family: 'DM Sans', sans-serif;
+  font-size: 12.5px; font-weight: 500; color: #d9dde5; text-decoration: none; white-space: nowrap;
 }
+.side-link:hover { background: rgba(255,255,255,0.07); color: #fff; text-decoration: none; }
+.side-link.active { background: var(--gold); color: var(--navy-2); font-weight: 600; }
+.side-link.top-level { margin-bottom: 4px; }
+.side-link .ml-icon { flex-shrink: 0; }
+
+.side-group { margin-bottom: 2px; }
+.side-group-label {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; background: none; border: none;
+  cursor: pointer; padding: 10px 16px 4px 16px; font-family: 'DM Sans', sans-serif; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; color: var(--gold-light);
+}
+.side-group-chevron { font-size: 9px; transition: transform 0.15s ease; }
+.side-group.collapsed .side-group-chevron { transform: rotate(-90deg); }
+.side-group.collapsed .side-group-items { display: none; }
+
+/* Collapsed whole-sidebar state: icon-only rail. Labels and group
+   headers hide entirely rather than truncate — a 40px rail with clipped
+   text reads worse than no text at all. */
+body.sidebar-collapsed .sidebar { width: 52px; }
+body.sidebar-collapsed .side-label,
+body.sidebar-collapsed .side-group-label span:first-child,
+body.sidebar-collapsed .side-group-chevron { display: none; }
+body.sidebar-collapsed .side-link { justify-content: center; padding: 8px; }
+body.sidebar-collapsed .side-group-label { justify-content: center; padding: 8px 0; }
+body.sidebar-collapsed .side-group.collapsed .side-group-items { display: block; }
+
+.app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* ---------- Thread bar ---------- */
 .thread-bar {
@@ -136,8 +166,10 @@ a:hover { text-decoration: underline; }
   color: #f2ede0;
   padding: 7px 12px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 6px 0;
   border-bottom: 2px solid var(--gold);
 }
 .applet-titlebar-child {
@@ -150,7 +182,7 @@ a:hover { text-decoration: underline; }
   font-size: 17px;
   letter-spacing: 0.3px;
 }
-.applet-toolbar { display: flex; align-items: center; gap: 6px; }
+.applet-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .applet-toolbar form { display: inline-flex; align-items: center; margin: 0; }
 
 /* ---------- Buttons (beveled, Windows-classic) ---------- */
@@ -181,7 +213,7 @@ a:hover { text-decoration: underline; }
 .btn:active { box-shadow: inset 1px 1px 2px rgba(0,0,0,0.25); }
 .btn-toolbar { color: #f2ede0; background: linear-gradient(180deg, #4a6289 0%, #33507a 100%); border-color: #1a2c47; }
 .btn-toolbar:hover { background: linear-gradient(180deg, #5a719a 0%, #3d5c89 100%); }
-.btn-primary { background: linear-gradient(180deg, var(--gold-light) 0%, var(--gold) 100%); border-color: #7d5f21; color: #2c1f05; font-weight: 600; padding: 7px 22px; height: 32px; }
+.btn-primary { background: linear-gradient(180deg, var(--gold-light) 0%, var(--gold) 100%); border-color: #7d5f21; color: #2c1f05; font-weight: 600; padding: 6px 20px; height: 26px; }
 .btn-primary:hover { background: linear-gradient(180deg, #d8b56d 0%, #b98f38 100%); }
 .btn-danger { color: #f6e3e3; background: linear-gradient(180deg, #a13c3c 0%, #7c2222 100%); border-color: #4a1414; }
 .btn-danger:hover { background: linear-gradient(180deg, #b64949 0%, #8c2828 100%); }
@@ -466,6 +498,16 @@ a:hover { text-decoration: underline; }
   border-right: 1px solid #ececE2;
   white-space: nowrap;
 }
+/* Opt-in override for a reference/prose table (Help, Getting Started) —
+   long, multi-sentence explanatory cells need to wrap like normal text.
+   Base .list-table stays nowrap unchanged, since that's genuinely
+   correct for real data-grid rows elsewhere (a landlord code, a phone
+   number) — this only applies where explicitly added. */
+.list-table.prose td {
+  white-space: normal;
+  vertical-align: top;
+  line-height: 1.5;
+}
 .row-even { background: var(--white); }
 .row-odd { background: var(--row-alt); }
 .data-row { cursor: pointer; }
@@ -534,6 +576,7 @@ a:hover { text-decoration: underline; }
 .field-value input[type="number"],
 .field-value input[type="date"],
 .field-value input[type="datetime-local"],
+.field-value input[type="file"],
 .field-value select,
 .field-value textarea {
   width: 100%;
@@ -545,6 +588,24 @@ a:hover { text-decoration: underline; }
   background: var(--white);
   box-shadow: inset 1px 1px 2px rgba(0,0,0,0.12);
 }
+/* The "Browse..." button portion of a file input is separately
+   styleable via this pseudo-element — without it, only the "No file
+   selected" text picks up the font-family above, and the button itself
+   stays pure browser-default, which is exactly the visible mismatch
+   that was reported (the image upload button looking inconsistent). */
+.field-value input[type="file"]::file-selector-button {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  margin-right: 8px;
+  color: var(--ink-soft);
+  background: linear-gradient(180deg, #e8e6dc 0%, #d2cfc2 100%);
+  border: 1px solid var(--border-dark);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.field-value input[type="file"]::file-selector-button:hover { background: #efedE4; }
 .field-value input[readonly] {
   background: #efece2;
   color: var(--ink-soft);
@@ -577,22 +638,18 @@ a:hover { text-decoration: underline; }
 @media (max-width: 720px) {
   .field-grid { grid-template-columns: 1fr; }
   .masthead { flex-direction: column; gap: 2px; }
+  /* .field-row's fixed 170px label column was the actual remaining cause
+     of fields still overflowing narrow windows even after .field-grid
+     above collapsed to one column — 170px plus a value column with any
+     real content doesn't fit a genuinely narrow window. Stack label
+     above value instead of side-by-side, so the value column gets the
+     full available width rather than whatever's left after a fixed
+     label width. */
+  .field-row { grid-template-columns: 1fr; row-gap: 3px; }
+  .field-label { padding-top: 0; }
 }
 
 /* ---------- Admin ---------- */
-.screen-tab.admin-tab {
-  margin-left: auto;
-  background: linear-gradient(180deg, #efe0bd 0%, #d9c295 100%);
-  color: #4a3a15;
-  border-color: #a9812f;
-}
-.screen-tab.admin-tab.active {
-  background: var(--panel-bg);
-  color: var(--navy-2);
-  border-bottom: 1px solid var(--panel-bg);
-}
-.screen-tabs { position: relative; }
-
 .admin-notice {
   margin: 10px 12px 0 12px;
   padding: 8px 12px;
@@ -740,6 +797,7 @@ input[type="number"] {
 /* ---------- Admin sub-tabs (Tables / Views / Users / Audit Log) ---------- */
 .admin-subtabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 2px;
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border-dark);
@@ -762,3 +820,697 @@ input[type="number"] {
   border-bottom: 2px solid var(--gold);
   background: var(--white);
 }
+
+/* ---------- Bills matrix (bills.ejs / js/bills.js) ---------- */
+/* Same table language as .list-table, plus: a sticky item column so the
+   12-month scroll never loses row identity, a visually "open" entry
+   column, and the category/subtotal banding the Excel sheet had. */
+.bills-fy-label { font-size: 11px; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 5px; margin-right: 6px; }
+.bills-fy-label select { font-family: 'DM Sans', sans-serif; font-size: 12px; padding: 3px 5px; border: 1px solid var(--border-dark); border-radius: 2px; background: var(--white); }
+.bills-scroll { overflow-x: auto; }
+.bills-table { min-width: 1100px; }
+.bills-table td, .bills-table th { white-space: nowrap; text-align: right; }
+.bills-table .bills-col-item { text-align: left; position: sticky; left: 0; background: var(--white); min-width: 170px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; box-shadow: 1px 0 0 var(--border-dark); }
+.bills-table thead .bills-col-item { background: inherit; }
+.bills-table .bills-col-meta { text-align: left; color: var(--ink-soft); font-size: 11px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+.bills-table .bills-col-due { text-align: center; }
+.bills-table .bills-col-total { font-weight: 600; border-left: 1px solid var(--border-dark); }
+.bills-cat-row td { background: var(--navy-1); color: #f4efe3; font-weight: 600; letter-spacing: 0.4px; text-align: left; font-size: 11px; text-transform: uppercase; position: static; }
+.bills-subtotal-row td { background: var(--panel-bg); font-weight: 600; border-top: 1px solid var(--border-dark); }
+.bills-subtotal-row td:first-child { text-align: left; }
+.bills-grand-row td { background: var(--chrome-bg-dark); font-weight: 700; border-top: 2px solid var(--border-dark); }
+.bills-grand-row td:first-child { text-align: left; }
+.bills-entry-col { background: var(--gold-soft, #f7ecd5); }
+.bills-table td.bills-entry-col { padding: 2px 4px; }
+.bills-table .bills-entry-col input {
+  width: 100%; text-align: right; font-family: 'DM Sans', sans-serif; font-size: 12px; color: inherit;
+  padding: 3px 5px; border: 1px solid transparent; border-radius: 2px; background: transparent;
+}
+.bills-table .bills-entry-col input:focus { border-color: var(--gold); background: var(--white); outline: 2px solid var(--gold-light); outline-offset: 0; }
+.bills-cell-split a { color: var(--danger); }
+.bills-archived td { color: var(--ink-soft); font-style: italic; }
+.bills-archived-tag { font-size: 10px; color: var(--ink-soft); }
+.bills-status { padding: 6px 12px; font-size: 12px; background: var(--panel-bg); border-bottom: 1px solid var(--border-dark); }
+.bills-status-ok { background: #e7efe4; color: var(--ok); }
+.bills-status-error { background: var(--danger-bg); color: var(--danger); }
+.bills-empty { text-align: left; padding: 14px; color: var(--ink-soft); }
+
+/* ---------- Reminders board ---------- */
+.rem-badge { display: inline-block; padding: 2px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; border-radius: 2px; border: 1px solid; }
+.rem-badge-overdue { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
+.rem-badge-due { background: #fdf7e8; color: #8a6d1a; border-color: var(--gold); }
+.rem-badge-upcoming { background: var(--panel-bg); color: var(--ink-soft); border-color: var(--border-dark); }
+.rem-badge-done { background: #e7efe4; color: var(--ok); border-color: var(--ok); }
+.rem-badge-paused, .rem-badge-misconfigured { background: var(--panel-bg); color: var(--ink-soft); border-color: var(--border-dark); font-style: italic; }
+.rem-row-overdue td { background: #fdf3f2; }
+.rem-done-form { display: flex; gap: 4px; align-items: center; }
+.rem-done-form input[type=date] { font-size: 11px; padding: 2px 4px; border: 1px solid var(--border-dark); border-radius: 2px; }
+
+/* Home "Due Soon" panel reuses applet chrome; only the count pill is new */
+.home-due-count { background: var(--danger); color: #fff; border-radius: 8px; padding: 0 7px; font-size: 11px; font-weight: 700; margin-left: 6px; }
+
+/* Home Screen KPI-style cards (Rent Status, Overview) */
+.home-kpi-row { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; }
+.home-kpi-card { flex: 1; min-width: 160px; background: var(--panel-bg); border: 1px solid var(--border-dark); border-radius: 4px; padding: 10px 14px; text-align: center; }
+.home-kpi-value { font-family: 'Cormorant Garamond', serif; font-weight: 600; font-size: 24px; color: var(--navy-2); }
+.home-kpi-label { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+.home-kpi-card.home-kpi-ok .home-kpi-value { color: var(--ok); }
+.home-kpi-card.home-kpi-warn .home-kpi-value { color: var(--danger); }
+
+/* ---------- Tax computation sheet ---------- */
+.tax-sheet { max-width: 860px; }
+.tax-table { margin-bottom: 14px; }
+.tax-table td:last-child, .tax-table th:last-child { text-align: right; }
+.tax-table td, .tax-table th { padding: 5px 10px; }
+.tax-section td { background: var(--navy-1); color: #f4efe3; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+.tax-sub td { font-weight: 600; border-top: 1px solid var(--border-dark); background: var(--panel-bg); }
+.tax-grand td { font-weight: 700; border-top: 2px solid var(--border-dark); background: var(--chrome-bg-dark); }
+.tax-short { color: var(--danger); font-weight: 700; }
+.tax-disclaimer { font-size: 11px; color: var(--ink-soft); padding: 10px 12px; border-top: 1px dashed var(--border-dark); }
+/* Advance Tax Projection — deliberately distinct from the real Tax
+   Worksheet's own navy/gold language, so a projection is never visually
+   mistaken for a real, filed computation. */
+.tax-projection-banner {
+  background: #fff7e0; border: 1px solid #e0c366; color: #6b4e00;
+  padding: 8px 12px; margin-bottom: 10px; border-radius: 3px; font-size: 12.5px;
+}
+.tax-projection-mismatch { background: #fff7e0; }
+.tax-projection-flag { font-size: 11px; color: #8a6400; margin-top: 2px; }
+@media print {
+  .masthead, .screenbar, .statusbar, .applet-toolbar, .sidebar, .thread-bar { display: none !important; }
+  .tax-sheet { max-width: none; }
+  body { background: #fff; }
+}
+
+/* ---------- Notifications admin page ---------- */
+/* Reuses the existing admin-notice / admin-help / format-warning language;
+   only the layout helpers this page needs are new. */
+.admin-h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ink-soft); margin: 32px 0 6px; padding: 0 16px 4px 16px; border-bottom: 1px solid var(--border-dark); }
+.admin-h4 { font-size: 12px; font-weight: 600; margin: 22px 0 4px; padding: 0 16px; }
+.admin-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 8px 0; padding: 0 16px; }
+/* Scoped to this one page's own outer class, not the shared .list-table
+   rule itself (used on 38 other views app-wide, where a table flush to
+   its container's edges is the established, intentional look) — here,
+   the table sits among padded paragraphs and headings rather than being
+   the page's sole content, so it needs the same 16px inset they have. */
+.notifications-page table.list-table { margin: 0 16px; width: calc(100% - 32px); }
+.admin-form label { display: inline-flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--ink-soft); }
+/* A checkbox reads naturally as "box, then its own text" on one line —
+   the column stacking above is right for every OTHER field here (a text
+   label above its input) but wrong for this one, which needs a row. */
+/* Two-line shape matching every sibling label here (a spacer line, then
+   the real control) so this label's total height matches theirs — with
+   align-items: flex-end on the parent, a shorter single-line label would
+   otherwise land its content lower than the other fields' own text,
+   roughly level with their input boxes instead. The spacer keeps the
+   checkbox's OWN row (not just its own text) aligned with those inputs. */
+.admin-form label.checkbox-field .checkbox-field-spacer { font-size: 11px; line-height: 1; }
+.admin-form label.checkbox-field .checkbox-field-row { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); height: 26px; }
+.admin-form input[type=text], .admin-form input[type=password], .admin-form input[type=number], .admin-form select {
+  font-family: 'DM Sans', sans-serif; font-size: 12px; padding: 4px 6px;
+  border: 1px solid var(--border-dark); border-radius: 2px; background: var(--white); min-width: 150px;
+}
+.inline-form { display: flex; gap: 5px; align-items: center; }
+.inline-form input[type=text] { font-family: 'DM Sans', sans-serif; font-size: 12px; padding: 3px 5px; border: 1px solid var(--border-dark); border-radius: 2px; width: 160px; }
+.preview-block { border: 1px solid var(--border-dark); border-radius: 2px; padding: 8px 10px; margin: 8px 0; background: var(--panel-bg); }
+/* Digest preview is shown as plain text (tags stripped in the template),
+   so it must wrap rather than scroll a family off the edge of a phone. */
+.preview-pre { font-family: 'DM Mono', monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word; margin: 4px 0; padding: 8px; background: var(--white); border: 1px solid var(--border-dark); border-radius: 2px; }
+
+/* ============================================================
+   THEME: Salesforce Lightning  —  html[data-theme="salesforce"]
+   ------------------------------------------------------------
+   Purely additive. The default (attribute absent) is the original
+   Siebel-classic theme above, whose bytes are left untouched. This
+   block (a) redefines the :root design tokens to a Salesforce Lightning
+   Design System (SLDS) palette, which re-skins everything that already
+   draws from var(--…), and (b) overrides the handful of rules that
+   hard-code colours, gradients or the beveled Windows-classic chrome,
+   plus the Cormorant serif display font — none of which flow through
+   the tokens. Toggled live from the masthead (mlToggleTheme in app.js);
+   the choice persists per-device in localStorage and is re-applied
+   before first paint by the inline script in partials/head.ejs, so
+   there is no flash of the other theme on load.
+   ============================================================ */
+html[data-theme="salesforce"] {
+  --chrome-bg:      #f3f2f2;  /* SLDS page canvas */
+  --chrome-bg-dark: #ecebea;
+  --panel-bg:       #ffffff;  /* cards / panels are white */
+  --white:          #ffffff;
+  --ink:            #181818;  /* SLDS default text */
+  --ink-soft:       #3e3e3c;  /* SLDS weak text */
+  --navy-1:         #0176d3;  /* SLDS brand blue — header + sidebar */
+  --navy-2:         #014486;
+  --navy-3:         #032d60;
+  --gold:           #0176d3;  /* accent recoloured gold -> blue */
+  --gold-light:     #1b96ff;
+  --border-dark:    #c9c7c5;  /* SLDS border */
+  --border-light:   #ffffff;
+  --row-alt:        #fafaf9;  /* SLDS neutral row */
+  --row-hover:      #f3f2f2;
+  --link:           #0176d3;
+  --danger:         #ba0517;  /* SLDS destructive */
+  --danger-bg:      #fef1ee;
+  --ok:             #2e844a;  /* SLDS success */
+}
+
+/* Typography — SLDS is all sans; drop the Cormorant Garamond serif. */
+html[data-theme="salesforce"] body,
+html[data-theme="salesforce"] .btn,
+html[data-theme="salesforce"] .field-value input,
+html[data-theme="salesforce"] .field-value select,
+html[data-theme="salesforce"] .field-value textarea {
+  font-family: "Salesforce Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+html[data-theme="salesforce"] .brand-name,
+html[data-theme="salesforce"] .brand-mark,
+html[data-theme="salesforce"] .applet-title,
+html[data-theme="salesforce"] .section-header,
+html[data-theme="salesforce"] .login-card-title {
+  font-family: "Salesforce Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-style: normal;
+}
+
+/* Masthead — solid Lightning-blue global header with white text. */
+html[data-theme="salesforce"] .masthead {
+  color: #ffffff;
+  border-bottom: 1px solid rgba(0,0,0,0.15);
+  box-shadow: 0 2px 3px rgba(0,0,0,0.10);
+}
+html[data-theme="salesforce"] .masthead-user { color: #eaf5ff; }
+html[data-theme="salesforce"] .masthead-meta { color: #bcdcff; }
+html[data-theme="salesforce"] .brand-name    { color: #ffffff; font-weight: 700; }
+html[data-theme="salesforce"] .brand-mark    { background: #ffffff; color: #0176d3; font-weight: 700; }
+
+/* Sidebar — Lightning console dark-blue nav; active item gets the
+   SLDS-style left accent bar instead of the gold fill. */
+html[data-theme="salesforce"] .side-link.active {
+  background: rgba(255,255,255,0.16);
+  color: #ffffff;
+  box-shadow: inset 3px 0 0 #1b96ff;
+}
+
+/* Applets as Lightning cards — white header, hairline border, soft shadow. */
+html[data-theme="salesforce"] .applet-shell {
+  border: 1px solid #dddbda;
+  border-radius: 0.25rem;
+  box-shadow: 0 2px 2px rgba(0,0,0,0.05);
+}
+html[data-theme="salesforce"] .applet-titlebar {
+  background: #ffffff;
+  color: #181818;
+  border-bottom: 1px solid #dddbda;
+}
+html[data-theme="salesforce"] .applet-titlebar-child {
+  background: #fafaf9;
+  color: #181818;
+  border-bottom: 1px solid #dddbda;
+}
+html[data-theme="salesforce"] .applet-title { color: #181818; font-weight: 700; font-size: 15px; }
+
+/* Buttons — flat SLDS neutral / brand / destructive (no bevel gradients). */
+html[data-theme="salesforce"] .btn {
+  background: #ffffff;
+  border: 1px solid #c9c7c5;
+  border-radius: 0.25rem;
+  color: #0176d3;
+  box-shadow: none;
+}
+html[data-theme="salesforce"] .btn:hover  { background: #f4f6f9; color: #014486; }
+html[data-theme="salesforce"] .btn:active { background: #eef1f6; box-shadow: none; }
+html[data-theme="salesforce"] .btn-primary,
+html[data-theme="salesforce"] .btn-toolbar {
+  background: #0176d3; border-color: #0176d3; color: #ffffff;
+}
+html[data-theme="salesforce"] .btn-primary:hover,
+html[data-theme="salesforce"] .btn-toolbar:hover {
+  background: #014486; border-color: #014486; color: #ffffff;
+}
+html[data-theme="salesforce"] .btn-danger {
+  background: #ba0517; border-color: #ba0517; color: #ffffff;
+}
+html[data-theme="salesforce"] .btn-danger:hover { background: #8e030f; border-color: #8e030f; }
+html[data-theme="salesforce"] .btn-nav {
+  background: #ffffff; border: 1px solid #c9c7c5; color: #0176d3;
+}
+html[data-theme="salesforce"] .btn-nav:hover { background: #f4f6f9; }
+
+/* Inputs — hairline border, no inset bevel, blue SLDS focus ring. */
+html[data-theme="salesforce"] .field-value input[type="text"],
+html[data-theme="salesforce"] .field-value input[type="password"],
+html[data-theme="salesforce"] .field-value input[type="number"],
+html[data-theme="salesforce"] .field-value input[type="date"],
+html[data-theme="salesforce"] .field-value input[type="datetime-local"],
+html[data-theme="salesforce"] .field-value input[type="file"],
+html[data-theme="salesforce"] .field-value select,
+html[data-theme="salesforce"] .field-value textarea,
+html[data-theme="salesforce"] .masthead-search input,
+html[data-theme="salesforce"] .query-bar input[type="text"],
+html[data-theme="salesforce"] .bills-fy-label select {
+  border: 1px solid #c9c7c5;
+  border-radius: 0.25rem;
+  box-shadow: none;
+}
+html[data-theme="salesforce"] .field-value input:focus,
+html[data-theme="salesforce"] .field-value select:focus,
+html[data-theme="salesforce"] .field-value textarea:focus,
+html[data-theme="salesforce"] .masthead-search input:focus,
+html[data-theme="salesforce"] .query-bar input[type="text"]:focus {
+  border-color: #0176d3;
+  box-shadow: 0 0 3px #0176d3;
+  outline: none;
+}
+html[data-theme="salesforce"] .field-value input[type="file"]::file-selector-button {
+  background: #ffffff; border: 1px solid #c9c7c5; border-radius: 0.25rem; color: #0176d3;
+}
+
+/* List tables — SLDS uppercase-grey column headers, hairline row rules. */
+html[data-theme="salesforce"] .list-table thead th {
+  background: #fafaf9;
+  color: #444444;
+  border: 1px solid #dddbda;
+  border-top: none;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+html[data-theme="salesforce"] .list-table td {
+  border-bottom: 1px solid #dddbda;
+  border-right: none;
+}
+
+/* Section dividers, admin sub-tabs & remaining gold->blue accents. */
+html[data-theme="salesforce"] .field-row.section-row { border-bottom: 1px solid #dddbda; }
+html[data-theme="salesforce"] .section-header { color: #181818; font-weight: 700; }
+html[data-theme="salesforce"] .admin-subtab:hover { color: #0176d3; }
+html[data-theme="salesforce"] .admin-subtab.active { color: #0176d3; border-bottom-color: #0176d3; }
+html[data-theme="salesforce"] .bills-cat-row td { color: #ffffff; }
+html[data-theme="salesforce"] .rem-badge-due {
+  border-color: #dd7a01; background: #fef5e7; color: #8c4b02;
+}
+
+/* Lightning rounding on the standalone cards. */
+html[data-theme="salesforce"] .login-card,
+html[data-theme="salesforce"] .report-card { border-radius: 0.25rem; }
+
+/* ============================================================
+   THEME: Coral  —  html[data-theme="coral"]
+   ------------------------------------------------------------
+   A clean, airy modern-SaaS dashboard look (à la the Glamhaven
+   reference): white sidebar + white top bar with dark text, light
+   canvas, rounded white cards with soft shadows, and a warm
+   coral-orange accent (logo mark, primary button, and the active
+   nav item's peach highlight + orange left bar).
+   Like the Salesforce block, this is purely additive and gated on the
+   attribute, so the default Siebel theme is untouched. Two differences
+   from the Salesforce theme: the accent token (--gold) is recoloured to
+   orange rather than blue, and the chrome is flipped from dark to light
+   — so the masthead and sidebar backgrounds and their (hard-coded,
+   light-on-dark) text colours are overridden to dark-on-white here.
+   ============================================================ */
+html[data-theme="coral"] {
+  --chrome-bg:      #f6f7f9;   /* light page canvas */
+  --chrome-bg-dark: #eef0f3;
+  --panel-bg:       #ffffff;
+  --white:          #ffffff;
+  --ink:            #181d27;   /* near-black headings */
+  --ink-soft:       #667085;   /* secondary grey */
+  --navy-1:         #1f2430;   /* residual dark-chrome usages -> near-black */
+  --navy-2:         #181d27;
+  --navy-3:         #12161e;
+  --gold:           #ef6820;   /* accent recoloured gold -> coral-orange */
+  --gold-light:     #fb8b4d;
+  --border-dark:    #e9eaec;   /* very light hairline border */
+  --border-light:   #ffffff;
+  --row-alt:        #fafbfc;
+  --row-hover:      #f6f7f9;
+  --link:           #ef6820;
+  --danger:         #e5484d;
+  --danger-bg:      #fdecec;
+  --ok:             #1fa363;
+}
+
+/* Typography — body/UI in Plus Jakarta Sans; display headings in Aptos
+   (Microsoft's Office/Windows font, replacing the base Cormorant serif).
+   Aptos isn't on Google Fonts and its licence doesn't permit free web
+   self-hosting, so it's referenced by name with a Segoe UI/system fallback:
+   viewers who have Aptos installed see it, others fall back gracefully. */
+html[data-theme="coral"] body,
+html[data-theme="coral"] .btn,
+html[data-theme="coral"] .field-value input,
+html[data-theme="coral"] .field-value select,
+html[data-theme="coral"] .field-value textarea {
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+html[data-theme="coral"] .brand-name,
+html[data-theme="coral"] .brand-mark,
+html[data-theme="coral"] .applet-title,
+html[data-theme="coral"] .section-header,
+html[data-theme="coral"] .login-card-title,
+html[data-theme="coral"] .query-count,
+html[data-theme="coral"] .report-card-title,
+html[data-theme="coral"] .home-kpi-value {
+  font-family: "Aptos Display", "Aptos", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  font-style: normal;
+}
+
+/* Masthead — flip to a white top bar with dark text. */
+html[data-theme="coral"] .masthead {
+  background: #ffffff;
+  color: var(--ink);
+  border-bottom: 1px solid var(--border-dark);
+  box-shadow: none;
+}
+html[data-theme="coral"] .masthead-user   { color: var(--ink-soft); }
+html[data-theme="coral"] .masthead-meta   { color: var(--ink-soft); }
+html[data-theme="coral"] .sidebar-toggle  { color: var(--ink-soft); }
+html[data-theme="coral"] .sidebar-toggle:hover { background: #f2f3f5; }
+html[data-theme="coral"] .brand-name      { color: var(--ink); font-weight: 700; }
+/* Orange gradient logo chip, matching the reference. */
+html[data-theme="coral"] .brand-mark {
+  background: linear-gradient(135deg, #fb8b4d 0%, #ef6820 100%);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+/* Sidebar — flip to white with dark text; active item gets the peach
+   highlight + orange left accent bar (icons follow via currentColor). */
+html[data-theme="coral"] .sidebar {
+  background: #ffffff;
+  border-right: 1px solid var(--border-dark);
+}
+html[data-theme="coral"] .side-link { color: var(--ink-soft); }
+html[data-theme="coral"] .side-link:hover { background: #f5f6f8; color: var(--ink); }
+html[data-theme="coral"] .side-link.active {
+  background: #fff3ec;
+  color: #ef6820;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 #ef6820;
+}
+html[data-theme="coral"] .side-group-label { color: var(--ink-soft); }
+
+/* Cards (applets) — rounded white cards with a soft shadow. */
+html[data-theme="coral"] .applet-shell {
+  border: 1px solid var(--border-dark);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(16,24,40,0.04), 0 1px 3px rgba(16,24,40,0.06);
+  overflow: hidden;
+}
+html[data-theme="coral"] .applet-titlebar {
+  background: #ffffff;
+  color: var(--ink);
+  border-bottom: 1px solid var(--border-dark);
+  border-radius: 12px 12px 0 0;
+}
+html[data-theme="coral"] .applet-titlebar-child {
+  background: #ffffff;
+  color: var(--ink);
+  border-bottom: 1px solid var(--border-dark);
+  border-radius: 0;
+}
+html[data-theme="coral"] .applet-title { color: var(--ink); font-weight: 700; font-size: 15px; }
+
+/* Buttons — rounded; coral-orange primary, neutral secondary. */
+html[data-theme="coral"] .btn {
+  background: #ffffff;
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  color: var(--ink);
+  box-shadow: none;
+}
+html[data-theme="coral"] .btn:hover  { background: #f7f8fa; }
+html[data-theme="coral"] .btn:active { background: #f0f1f3; box-shadow: none; }
+html[data-theme="coral"] .btn-toolbar {
+  background: #ffffff; color: var(--ink); border: 1px solid var(--border-dark);
+}
+html[data-theme="coral"] .btn-toolbar:hover { background: #f7f8fa; }
+html[data-theme="coral"] .btn-primary {
+  background: #ef6820; border-color: #ef6820; color: #ffffff; border-radius: 8px;
+}
+html[data-theme="coral"] .btn-primary:hover { background: #d95c17; border-color: #d95c17; }
+html[data-theme="coral"] .btn-danger {
+  background: #e5484d; border-color: #e5484d; color: #ffffff; border-radius: 8px;
+}
+html[data-theme="coral"] .btn-danger:hover { background: #cf3b40; border-color: #cf3b40; }
+html[data-theme="coral"] .btn-nav {
+  background: #ffffff; border: 1px solid var(--border-dark); color: var(--ink);
+}
+html[data-theme="coral"] .btn-nav:hover { background: #f7f8fa; }
+
+/* Inputs — rounded, hairline border, soft orange focus ring. */
+html[data-theme="coral"] .field-value input[type="text"],
+html[data-theme="coral"] .field-value input[type="password"],
+html[data-theme="coral"] .field-value input[type="number"],
+html[data-theme="coral"] .field-value input[type="date"],
+html[data-theme="coral"] .field-value input[type="datetime-local"],
+html[data-theme="coral"] .field-value input[type="file"],
+html[data-theme="coral"] .field-value select,
+html[data-theme="coral"] .field-value textarea,
+html[data-theme="coral"] .masthead-search input,
+html[data-theme="coral"] .query-bar input[type="text"],
+html[data-theme="coral"] .bills-fy-label select {
+  border: 1px solid var(--border-dark);
+  border-radius: 8px;
+  box-shadow: none;
+}
+html[data-theme="coral"] .field-value input:focus,
+html[data-theme="coral"] .field-value select:focus,
+html[data-theme="coral"] .field-value textarea:focus,
+html[data-theme="coral"] .masthead-search input:focus,
+html[data-theme="coral"] .query-bar input[type="text"]:focus {
+  border-color: #ef6820;
+  box-shadow: 0 0 0 3px rgba(239,104,32,0.15);
+  outline: none;
+}
+html[data-theme="coral"] .field-value input[type="file"]::file-selector-button {
+  background: #ffffff; border: 1px solid var(--border-dark); border-radius: 8px; color: var(--ink);
+}
+
+/* List table — light header with grey uppercase labels, airy rows. */
+html[data-theme="coral"] .list-table thead th {
+  background: #fff8f3;
+  color: var(--ink-soft);
+  border: none;
+  border-bottom: 1px solid var(--border-dark);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 10px 12px;
+}
+html[data-theme="coral"] .list-table td {
+  border-bottom: 1px solid var(--border-dark);
+  border-right: none;
+  padding: 9px 12px;
+}
+
+/* Pills / status flags — rounded pill shapes in modern colours. */
+html[data-theme="coral"] .bool-flag,
+html[data-theme="coral"] .bool-yes,
+html[data-theme="coral"] .bool-no,
+html[data-theme="coral"] .rem-badge { border-radius: 999px; }
+html[data-theme="coral"] .bool-yes { background: #e7f7ef; color: #1fa363; border-color: #c3ead5; }
+html[data-theme="coral"] .bool-no  { background: #f2f4f7; color: #667085; border-color: #e4e7ec; }
+html[data-theme="coral"] .rem-badge-due {
+  border-color: #f0a92c; background: #fdf3e3; color: #b26a06;
+}
+
+/* Section dividers, admin sub-tabs, misc accents. */
+html[data-theme="coral"] .field-row.section-row { border-bottom: 1px solid var(--border-dark); }
+html[data-theme="coral"] .section-header { color: var(--ink); font-weight: 700; }
+html[data-theme="coral"] .admin-subtab:hover { color: #ef6820; }
+html[data-theme="coral"] .admin-subtab.active { color: #ef6820; border-bottom-color: #ef6820; }
+html[data-theme="coral"] .thread-current { color: var(--ink); }
+/* Keep the bills category row light & airy rather than a dark bar. */
+html[data-theme="coral"] .bills-cat-row td { background: #f6f7f9; color: var(--ink); }
+
+/* Standalone cards — match the 12px card rounding. */
+html[data-theme="coral"] .login-card,
+html[data-theme="coral"] .report-card { border-radius: 12px; }
+
+/* ---- Email compose / preview modal (record-detail send-email) ---- */
+.ml-email-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: flex-start; justify-content: center; z-index: 1000; padding: 40px 16px; overflow: auto; }
+.ml-email-dialog { background: var(--panel-bg); border: 1px solid var(--border-dark); border-radius: 4px; width: 640px; max-width: 100%; padding: 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.25); }
+.ml-email-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.ml-email-lbl { display: block; margin: 8px 0; font-size: 12px; color: var(--ink-soft); }
+.ml-email-lbl input, .ml-email-lbl textarea { width: 100%; margin-top: 2px; box-sizing: border-box; }
+.ml-email-lbl-sm { font-size: 12px; color: var(--ink-soft); margin-top: 8px; }
+.ml-email-preview { border: 1px solid var(--border-dark); background: #fff; padding: 10px; min-height: 60px; max-height: 200px; overflow: auto; margin-top: 2px; }
+.ml-email-status { margin-top: 8px; min-height: 18px; font-size: 13px; }
+.ml-email-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+/* ---- Quick Action tiles (all themes; theme-var driven) ---- */
+.qa-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; padding: 12px; }
+.qa-tile { display: flex; align-items: center; gap: 8px; padding: 18px 16px; border: 1px solid var(--border-dark); border-radius: 6px; background: var(--panel-bg); color: var(--ink); text-decoration: none; font-weight: 600; font-size: 14px; transition: transform .08s ease, box-shadow .12s ease; }
+.qa-tile:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); transform: translateY(-1px); }
+.qa-tile-plus { font-size: 20px; line-height: 1; opacity: .65; }
+
+/* ============================================================
+   THEME: Coral — dashboard refinements (colorful stat cards,
+   accent action tiles, dotted status pills) toward a modern
+   admin-dashboard look. Scoped to Coral so Classic/Lightning
+   keep their own character.
+   ============================================================ */
+
+/* Colorful gradient KPI / stat cards, cycling a palette by position. */
+html[data-theme="coral"] .home-kpi-row { gap: 14px; padding: 14px; }
+html[data-theme="coral"] .home-kpi-card {
+  border: none; color: #fff; text-align: left;
+  border-radius: 14px; padding: 16px 18px;
+  box-shadow: 0 6px 16px rgba(16,24,40,0.10);
+  background: linear-gradient(135deg, #14b8a6, #0f766e);
+}
+html[data-theme="coral"] .home-kpi-row > .home-kpi-card:nth-child(4n+1) { background: linear-gradient(135deg, #f6883e, #ef6820); }
+html[data-theme="coral"] .home-kpi-row > .home-kpi-card:nth-child(4n+2) { background: linear-gradient(135deg, #14b8a6, #0f766e); }
+html[data-theme="coral"] .home-kpi-row > .home-kpi-card:nth-child(4n+3) { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+html[data-theme="coral"] .home-kpi-row > .home-kpi-card:nth-child(4n+4) { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+/* Semantic ok/warn keep their meaning (green / amber) and win over position. */
+html[data-theme="coral"] .home-kpi-row > .home-kpi-card.home-kpi-ok   { background: linear-gradient(135deg, #22c55e, #15803d); }
+html[data-theme="coral"] .home-kpi-row > .home-kpi-card.home-kpi-warn { background: linear-gradient(135deg, #f59e0b, #d97706); }
+html[data-theme="coral"] .home-kpi-value { color: #fff; font-weight: 800; font-size: 26px; }
+html[data-theme="coral"] .home-kpi-label { color: rgba(255,255,255,0.88); font-size: 12px; margin-top: 4px; }
+html[data-theme="coral"] .home-kpi-card.home-kpi-ok .home-kpi-value,
+html[data-theme="coral"] .home-kpi-card.home-kpi-warn .home-kpi-value { color: #fff; }
+
+/* Quick Action tiles — coral accent gradient (replaces the muted default). */
+html[data-theme="coral"] .qa-tile {
+  border: none; color: #fff; border-radius: 12px; padding: 22px 18px; font-weight: 700; font-size: 15px;
+  background: linear-gradient(135deg, #fb8b4d, #ef6820);
+  box-shadow: 0 4px 12px rgba(239,104,32,0.25);
+}
+html[data-theme="coral"] .qa-tile:hover { box-shadow: 0 8px 20px rgba(239,104,32,0.32); transform: translateY(-2px); }
+html[data-theme="coral"] .qa-tile-plus { opacity: .9; }
+
+/* Status flags as pills with a leading dot, like the reference tables. */
+html[data-theme="coral"] .bool-flag { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; }
+html[data-theme="coral"] .bool-flag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+/* A touch more air on the applet cards to match the reference spacing. */
+html[data-theme="coral"] .applet-shell { box-shadow: 0 2px 10px rgba(16,24,40,0.05); }
+
+/* ---- Read-only Detail applet (list-form view: fields of the selected record) ---- */
+.detail-applet { padding: 8px 20px 14px; display: grid; grid-template-columns: minmax(130px, 240px) 1fr; column-gap: 16px; }
+.detail-applet-row { display: contents; }
+.detail-applet-label { padding: 6px 0; font-weight: 600; color: var(--ink-soft); font-size: 12px; border-bottom: 1px solid var(--border-light); align-self: stretch; }
+.detail-applet-value { padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border-light); word-break: break-word; }
+.detail-applet-empty { color: #b0ab9c; }
+
+/* ---- FK peek info (read-only rollup/formula hint shown after fk selection) ---- */
+.fk-peek-info { margin-top: 4px; font-size: 11px; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.fk-peek-field strong { font-weight: 600; }
+
+/* ---- Mobile-responsive improvements (v3.18.0) ---- */
+/* Detail form: collapse two-column field grid to single-column on narrow screens */
+@media (max-width: 680px) {
+  .field-grid { grid-template-columns: 1fr; gap: 2px 0; }
+  .field-row { grid-template-columns: 1fr; gap: 2px 0; }
+  .field-label { padding-bottom: 0; }
+  .field-value { padding-top: 0; }
+  /* Larger touch targets on list rows */
+  .data-row td { padding: 10px 8px; }
+  .list-table thead th { padding: 10px 8px; }
+  /* Query bar stacks vertically */
+  .query-bar { flex-wrap: wrap; }
+  .query-bar input[type="text"] { min-width: 0; flex: 1 1 100%; }
+  /* Applet toolbar wraps */
+  .applet-toolbar { flex-wrap: wrap; gap: 6px; }
+  /* Home KPI cards: 2 per row instead of auto-fit 4 */
+  .home-kpi-row { grid-template-columns: repeat(2, 1fr); }
+  /* Quick action tiles: 1 per row */
+  .qa-grid { grid-template-columns: 1fr; }
+  /* Detail applet nav buttons: full width */
+  .btn-nav { min-width: 36px; }
+}
+
+/* ---- Admin tree navigation (tree sidebar + content layout) ---- */
+.admin-layout { display: flex; align-items: flex-start; flex: 1; min-width: 0; }
+.admin-tree {
+  position: sticky; top: 0; width: 200px; min-width: 200px; min-height: calc(100vh - 60px);
+  padding: 12px 0; border-right: 1px solid var(--border-dark);
+  font-size: 12px; overflow-y: auto; flex-shrink: 0;
+}
+.admin-content { flex: 1; min-width: 0; }
+.admin-tree-heading {
+  font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--ink-soft); padding: 12px 16px 4px; margin-top: 4px;
+}
+.admin-tree-group:first-child .admin-tree-heading { margin-top: 0; padding-top: 8px; }
+.admin-tree-item {
+  display: block; padding: 5px 16px 5px 24px; color: var(--ink); text-decoration: none;
+  font-size: 12.5px; border-left: 3px solid transparent; transition: background .1s;
+}
+.admin-tree-item:hover { background: rgba(0,0,0,0.04); text-decoration: none; }
+.admin-tree-item.active { font-weight: 600; color: var(--navy-2); border-left-color: var(--gold); background: rgba(0,0,0,0.03); }
+.admin-tree-item.standalone {
+  display: block; padding: 12px 16px 4px; margin-top: 4px;
+  font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--ink-soft); border-left: 3px solid transparent;
+}
+.admin-tree-item.standalone:hover { color: var(--ink); background: rgba(0,0,0,0.04); }
+.admin-tree-item.standalone.active { color: var(--navy-2); border-left-color: var(--gold); background: rgba(0,0,0,0.03); }
+/* Hide the old flat tabs (if any page still renders them) */
+.admin-subtabs { display: none; }
+
+/* Coral theme overrides for the admin tree */
+html[data-theme="coral"] .admin-tree-item.active { color: #ef6820; border-left-color: #ef6820; }
+html[data-theme="coral"] .admin-tree-item:hover { color: #ef6820; }
+/* Salesforce theme */
+html[data-theme="salesforce"] .admin-tree-item.active { color: #0176d3; border-left-color: #0176d3; }
+html[data-theme="salesforce"] .admin-tree-item:hover { color: #0176d3; }
+
+/* Mobile: tree collapses to horizontal scroll */
+@media (max-width: 680px) {
+  .admin-layout { flex-direction: column; }
+  .admin-tree {
+    width: 100%; min-width: 100%; min-height: auto; position: static;
+    border-right: none; border-bottom: 1px solid var(--border-dark);
+    display: flex; flex-wrap: wrap; gap: 0; padding: 8px;
+    overflow-y: visible;
+  }
+  .admin-tree-heading { padding: 6px 8px 2px; }
+  .admin-tree-group { display: flex; flex-wrap: wrap; gap: 0; }
+  .admin-tree-item { padding: 4px 10px; border-left: none; border-bottom: 2px solid transparent; }
+  .admin-tree-item.active { border-bottom-color: var(--gold); border-left-color: transparent; }
+  .admin-tree + .applet-shell { margin-left: 0; }
+}
+
+/* ---- Custom picklist inline option editor (Admin -> Fields) ---- */
+.picklist-rows-inline { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; vertical-align: middle; }
+.pv-row { display: inline-flex; align-items: center; gap: 2px; }
+
+/* ---- Custom colour picker (HSV square + hue bar; no native OS picker) ---- */
+.ml-cp { position: relative; display: inline-block; }
+.ml-cp-swatch-row { display: flex; align-items: center; gap: 8px; }
+.ml-cp-swatch { width: 34px; height: 26px; border: 1px solid var(--border-dark); border-radius: 4px; cursor: pointer; box-shadow: inset 0 0 0 2px #fff; }
+.ml-cp-hex { width: 90px; font-family: monospace; font-size: 12px; text-transform: uppercase; }
+.ml-cp-panel {
+  position: absolute; top: 34px; left: 0; z-index: 50;
+  background: #fff; border: 1px solid var(--border-dark); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18); padding: 12px; width: 220px; display: none;
+}
+.ml-cp-panel.open { display: block; }
+.ml-cp-sv-wrap { position: relative; width: 196px; height: 140px; border-radius: 4px; overflow: hidden; cursor: crosshair; }
+.ml-cp-sv-wrap canvas { display: block; }
+.ml-cp-sv-cursor {
+  position: absolute; width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.4); pointer-events: none;
+  transform: translate(-6px, -6px);
+}
+.ml-cp-hue-wrap { position: relative; width: 196px; height: 16px; margin-top: 10px; border-radius: 3px; overflow: hidden; cursor: pointer; }
+.ml-cp-hue-wrap canvas { display: block; }
+.ml-cp-hue-cursor {
+  position: absolute; top: -2px; width: 6px; height: 20px; border-radius: 2px;
+  background: #fff; border: 1px solid #888; box-shadow: 0 0 2px rgba(0,0,0,0.4); pointer-events: none;
+  transform: translateX(-3px);
+}
+.ml-cp-hexrow { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.ml-cp-hexrow label { font-size: 11px; color: var(--ink-soft); }
+.ml-cp-hexrow input { flex: 1; font-family: monospace; font-size: 12px; text-transform: uppercase; }
+.ml-cp-close { display: block; width: 100%; margin-top: 10px; }
+
+/* ---- Custom theme role list + live mockup ---- */
+.ct-role-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dotted #e2ded0; }
+.ct-role-label { width: 150px; font-weight: 600; font-size: 12.5px; }
+.ct-role-desc { font-size: 11px; color: var(--ink-soft); flex: 1; }
+.ct-live-preview { border: 1px solid var(--border-dark); border-radius: 6px; overflow: hidden; margin: 12px 0; }

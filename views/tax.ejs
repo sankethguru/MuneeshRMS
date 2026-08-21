@@ -1,0 +1,96 @@
+<%- include('partials/head') %>
+<% if (!print) { %><%- include('partials/nav') %><% } %>
+
+<% const inr = (n) => { const neg = n < 0; const v = Math.abs(Math.round(n)); const s = v.toLocaleString('en-IN'); return (neg ? '−₹' : '₹') + s; }; %>
+
+<div class="applet-shell tax-sheet <%= print ? 'tax-print' : '' %>">
+  <div class="applet-titlebar">
+    <span class="applet-title">Income Tax Computation — <%= landlordName %> [group <%= r.group.root %>: <%= r.group.codes.join(', ') %>] — FY <%= r.fy %> (AY <%= (Number(r.fy.slice(0,4))+1) + '-' + String((Number(r.fy.slice(0,4))+2)%100).padStart(2,'0') %>) — <%= r.regime %> Regime</span>
+    <% if (!print) { %>
+    <div class="applet-toolbar">
+      <a class="btn btn-toolbar" href="/tax_worksheets/<%= worksheet.TW_RowID %>">Edit Inputs</a>
+      <a class="btn btn-toolbar" href="/tax_payments/new/form">+ Record Payment</a>
+      <a class="btn btn-toolbar" href="/tax/<%= worksheet.TW_RowID %>?print=1" target="_blank">Print View</a>
+      <a class="btn btn-toolbar" href="/tax/annexure/<%= encodeURIComponent(r.group.root) %>?fy=<%= encodeURIComponent(worksheet.TW_FY) %>">Annexure</a>
+      <a class="btn btn-toolbar" href="/tax_worksheets">All Worksheets</a>
+    </div>
+    <% } %>
+  </div>
+
+  <% if (r.problems.length) { %>
+    <div class="bills-status bills-status-error"><% r.problems.forEach(p => { %><div><%= p %></div><% }) %></div>
+  <% } %>
+  <% if (!r.pulled.available) { %>
+    <div class="bills-status bills-status-error">The invoices table isn't available — gross rent and rent TDS show as zero. Enter figures via Other Income if needed.</div>
+  <% } %>
+
+  <table class="list-table tax-table">
+    <tbody>
+      <tr class="tax-section"><td colspan="2">A. Income from House Property</td></tr>
+      <tr><td>Gross rent — House Property tenancies (ex-GST, accrual — <%= r.pulled.count %> invoice<%= r.pulled.count === 1 ? '' : 's' %>)</td><td><%= inr(r.calc.gav) %></td></tr>
+      <tr><td>Less: municipal taxes paid</td><td><%= inr(-r.calc.municipal) %></td></tr>
+      <tr class="tax-sub"><td>Net annual value</td><td><%= inr(r.calc.nav) %></td></tr>
+      <tr><td>Less: standard deduction @ 30% (s.24a)</td><td><%= inr(-r.calc.stdDeduction) %></td></tr>
+      <tr><td>Less: housing loan interest (s.24b)</td><td><%= inr(-r.calc.loanInterest) %></td></tr>
+      <tr class="tax-sub"><td>Income from house property</td><td><%= inr(r.calc.houseProperty) %></td></tr>
+
+      <tr class="tax-section"><td colspan="2">B. Income from Other Sources</td></tr>
+      <% if (r.calc.otherSourcesRent > 0 || r.pulled.osCount > 0) { %><tr><td>Rent — Other Sources tenancies (vacant land / plant &amp; machinery — <%= r.pulled.osCount %> invoice<%= r.pulled.osCount === 1 ? '' : 's' %>, no s.24 deductions)</td><td><%= inr(r.calc.otherSourcesRent) %></td></tr><% } %>
+      <% r.tracked.heads.forEach(h => { %><tr><td><%= h.head %> (from Income (Other))</td><td><%= inr(h.amount) %></td></tr><% }) %>
+      <% if (r.calc.bankInterest > 0) { %><tr><td>Additional interest (manual entry)</td><td><%= inr(r.calc.bankInterest) %></td></tr><% } %>
+      <tr><td>Other income</td><td><%= inr(r.calc.otherIncome) %></td></tr>
+
+      <tr class="tax-section"><td colspan="2">C. Total Income</td></tr>
+      <tr><td>Gross total income</td><td><%= inr(r.calc.grossTotal) %></td></tr>
+      <tr><td>Less: deductions (as entered — regime validity is the auditor's call)</td><td><%= inr(-r.calc.deductions) %></td></tr>
+      <tr class="tax-sub"><td>Total income (rounded, s.288A)</td><td><%= inr(r.calc.totalIncome) %></td></tr>
+
+      <tr class="tax-section"><td colspan="2">D. Tax</td></tr>
+      <tr><td>Tax at slab rates (<%= r.regime %> regime)</td><td><%= inr(r.calc.baseTax) %></td></tr>
+      <% if (r.calc.rebate > 0) { %><tr><td>Less: rebate u/s 87A</td><td><%= inr(-r.calc.rebate) %></td></tr><% } %>
+      <% if (r.calc.surcharge > 0 || r.calc.marginalRelief > 0) { %>
+        <tr><td>Surcharge @ <%= (r.calc.surchargeRate*100).toFixed(0) %>%<%= r.calc.marginalRelief > 0 ? ' (after marginal relief of ' + inr(r.calc.marginalRelief) + ')' : '' %></td><td><%= inr(r.calc.surcharge) %></td></tr>
+      <% } %>
+      <tr><td>Health &amp; education cess</td><td><%= inr(r.calc.cess) %></td></tr>
+      <tr class="tax-sub"><td>Total tax liability (rounded, s.288B)</td><td><%= inr(r.calc.totalLiability) %></td></tr>
+      <tr><td>Less: TDS on rent (from invoices)</td><td><%= inr(-r.calc.rentTds) %></td></tr>
+      <tr><td>Less: other TDS/TCS credit</td><td><%= inr(-r.calc.otherTds) %></td></tr>
+      <tr class="tax-grand"><td><%= r.calc.netPayable >= 0 ? 'Net tax payable' : 'Refund due' %></td><td><%= inr(Math.abs(r.calc.netPayable)) %></td></tr>
+    </tbody>
+  </table>
+
+  <table class="list-table tax-table">
+    <thead>
+      <tr class="tax-section"><td colspan="4">E. Advance Tax Schedule (s.211)</td></tr>
+      <tr><th>Installment</th><th>Cumulative Due</th><th>Cumulative Paid</th><th>Shortfall</th></tr>
+    </thead>
+    <tbody>
+      <% r.schedule.forEach(inst => { %>
+        <tr>
+          <td><%= inst.label %></td>
+          <td><%= inr(inst.cumulativeDue) %></td>
+          <td><%= inr(inst.cumulativePaid) %></td>
+          <td class="<%= inst.shortfall > 0 ? 'tax-short' : '' %>"><%= inst.shortfall > 0 ? inr(inst.shortfall) : '—' %></td>
+        </tr>
+      <% }) %>
+      <tr class="tax-grand"><td>Total paid to date: <%= inr(r.totalPaid) %></td><td colspan="3">Balance vs full liability: <%= inr(r.balance) %></td></tr>
+    </tbody>
+  </table>
+
+  <% if (r.payments.length) { %>
+  <table class="list-table tax-table">
+    <thead><tr class="tax-section"><td colspan="3">Payments Recorded</td></tr><tr><th>Date</th><th>Amount</th><th>Challan</th></tr></thead>
+    <tbody>
+      <% r.payments.forEach(p => { %><tr><td><%= p.TP_Date %></td><td><%= inr(Number(p.TP_Amount)||0) %></td><td><%= p.TP_Challan || '' %></td></tr><% }) %>
+    </tbody>
+  </table>
+  <% } %>
+
+  <div class="tax-disclaimer">
+    Slab rates, cess, rebate, and surcharge tiers are read from the Tax Slabs and Tax Config tables and were seeded from published rates —
+    <b>verify them with your auditor before relying on this computation.</b> Interest u/s 234B/234C is deliberately not computed here.
+    Generated <%= new Date().toISOString().slice(0,10) %> by Muneesh Legacy.
+  </div>
+</div>
+
+<% if (print) { %><script>window.print();</script></body></html><% } else { %><%- include('partials/foot') %><% } %>
