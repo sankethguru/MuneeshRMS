@@ -40,6 +40,25 @@ const PORT = process.env.PORT || 2299;
 app.locals.appVersion = require('./package.json').version;
 
 if (!process.env.SESSION_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    // A real deployment must never run on the known, source-visible
+    // fallback secret below — anyone who's seen this codebase knows the
+    // exact string, so session cookies signed with it can be forged,
+    // a full authentication bypass. Local/dev use (NODE_ENV unset)
+    // still gets the warn-and-continue behavior below, so a first-time
+    // `docker-compose up` without a .env file yet still boots far
+    // enough to show the fix, rather than failing with no login page
+    // at all — the packaged Dockerfile sets NODE_ENV=production so the
+    // real shipped deployment target gets the strict check.
+    console.error('\n' + '!'.repeat(70));
+    console.error('! FATAL: SESSION_SECRET is not set and NODE_ENV=production.');
+    console.error('! Refusing to boot on a known, hardcoded fallback secret in a real');
+    console.error('! deployment — session cookies signed with it can be forged by');
+    console.error('! anyone who has seen this codebase. Set SESSION_SECRET in your');
+    console.error('! environment (see docker-compose.yml) and restart.');
+    console.error('!'.repeat(70) + '\n');
+    process.exit(1);
+  }
   console.warn('\n' + '!'.repeat(70));
   console.warn('! WARNING: SESSION_SECRET is not set — falling back to a hardcoded');
   console.warn('! development secret. Session cookies signed with this are NOT');
@@ -167,13 +186,13 @@ app.get('/login', (req, res) => {
   res.render('login', { error: req.query.error, nextUrl: req.query.next || '' });
 });
 
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
   const rateLimit = checkLoginRateLimit(req.body.username);
   if (rateLimit.blocked) {
     const msg = `Too many failed attempts. Try again in about ${rateLimit.minutesLeft} minute(s).`;
     return res.redirect('/login?error=' + encodeURIComponent(msg) + '&next=' + encodeURIComponent(req.body.next || ''));
   }
-  const user = usersLib.verifyPassword(req.body.username, req.body.password);
+  const user = await usersLib.verifyPassword(req.body.username, req.body.password);
   if (!user) {
     recordFailedLogin(req.body.username);
     return res.redirect('/login?error=' + encodeURIComponent('Incorrect username or password.') + '&next=' + encodeURIComponent(req.body.next || ''));
@@ -282,15 +301,15 @@ app.get('/account', (req, res) => {
   res.render('account', { error: req.query.error, notice: req.query.notice, activeKey: '' });
 });
 
-app.post('/account/password', (req, res) => {
+app.post('/account/password', async (req, res) => {
   try {
-    if (!usersLib.verifyPassword(req.currentUser.username, req.body.currentPassword)) {
+    if (!(await usersLib.verifyPassword(req.currentUser.username, req.body.currentPassword))) {
       throw new Error('Current password is incorrect.');
     }
     if (req.body.newPassword !== req.body.confirmPassword) {
       throw new Error('New password and confirmation do not match.');
     }
-    usersLib.changeOwnPassword(req.currentUser.id, req.body.newPassword);
+    await usersLib.changeOwnPassword(req.currentUser.id, req.body.newPassword);
     res.redirect('/account?notice=' + encodeURIComponent('Password updated.'));
   } catch (err) {
     res.redirect('/account?error=' + encodeURIComponent(err.message));
@@ -434,6 +453,19 @@ function validateRequiredAndTypes(entity, record) {
 // Persists uploaded image files under data/uploads/<entity>/<field>/ and
 // returns the filename that should be stored in the record. Prior file (if
 // being replaced) is removed to avoid orphans piling up.
+// Extensions that must never land on disk or be served for an
+// attacker-influenced upload — executable/script/markup types a browser
+// or the OS would treat as active content rather than inert data. The
+// filename's extension for a "file"-type upload is whatever the
+// uploader's original filename claimed (no magic-bytes check exists for
+// generic files, unlike images) — this is the actual safety net for
+// that field type, checked both at upload time (below) and again at
+// serve time (the /uploads route) as defense-in-depth.
+const DANGEROUS_UPLOAD_EXTENSIONS = new Set([
+  '.html', '.htm', '.svg', '.js', '.mjs', '.cjs', '.php', '.phtml', '.exe', '.sh',
+  '.bat', '.cmd', '.com', '.jar', '.msi', '.dll', '.ps1', '.vbs', '.wsf', '.xhtml',
+]);
+
 function persistUploadedImages(entity, files, record, priorRecord) {
   entity.fields.filter(f => f.type === 'image' || f.type === 'file').forEach(f => {
     const fieldKey = f.type === 'file' ? `file_${f.name}` : `img_${f.name}`;
@@ -444,6 +476,17 @@ function persistUploadedImages(entity, files, record, priorRecord) {
         const ext = detectRealImageExtension(uploaded.buffer);
         if (!ext) {
           throw new Error(`"${uploaded.originalname}" doesn't look like a genuine image file (JPG/PNG/GIF/WEBP) — the upload was rejected.`);
+        }
+      }
+      if (f.type === 'file') {
+        // No magic-bytes check exists for generic files (unlike images) —
+        // the extension is whatever the uploader's original filename
+        // claimed. Reject anything that would be dangerous to have ever
+        // land on disk at all, not just dangerous to later SERVE (see the
+        // matching check in the /uploads route) — belt and suspenders.
+        const claimedExt = path.extname(uploaded.originalname).toLowerCase();
+        if (DANGEROUS_UPLOAD_EXTENSIONS.has(claimedExt)) {
+          throw new Error(`"${uploaded.originalname}" has a file type (${claimedExt}) that isn't allowed for security reasons.`);
         }
       }
       const dir = path.join(UPLOADS_DIR, entity.key, f.name);
@@ -565,6 +608,7 @@ app.post('/screens/:screenKey/save/:entity/:id', requireEntity, auth.requirePerm
   // formula values must never be persisted, only derived on read.
   const recordForValidation = schemaLib.withComputedFields(req.schema, entity, record);
   const validationErrors = validateRequiredAndTypes(entity, record).concat(schemaLib.fkConstraintErrors(req.schema, entity, recordForValidation, before));
+  const returnView = req.body._returnView || '';
   const returnParams = new URLSearchParams();
   if (returnView) returnParams.set('view', returnView);
   Object.keys(req.body).forEach(k => { if (k.startsWith('_sel_')) returnParams.set(k.replace('_sel_', 'selected_'), req.body[k]); });
@@ -1258,7 +1302,7 @@ app.post('/:entity/:id/delete', requireEntity, auth.requirePermission('delete'),
 // can't be scraped by a user with no rights to that landlord record.
 app.get('/uploads/:entity/:field/:filename', requireEntity, auth.requirePermission('read'), (req, res) => {
   const entity = req.entity;
-  const field = entity.fields.find(f => f.name === req.params.field && f.type === 'image');
+  const field = entity.fields.find(f => f.name === req.params.field && (f.type === 'image' || f.type === 'file'));
   if (!field) return res.status(404).send('Not found.');
   // Refuse any path-traversal shenanigans in the filename before touching the FS.
   if (!/^[a-zA-Z0-9._-]+$/.test(req.params.filename) || req.params.filename.includes('..')) {
@@ -1266,6 +1310,21 @@ app.get('/uploads/:entity/:field/:filename', requireEntity, auth.requirePermissi
   }
   const filepath = path.join(UPLOADS_DIR, entity.key, field.name, req.params.filename);
   if (!fs.existsSync(filepath)) return res.status(404).send('Not found.');
+  if (field.type === 'file') {
+    // Generic file uploads have no magic-bytes validation (unlike images,
+    // which are verified against their real content) — the extension is
+    // whatever the uploader's original filename claimed. Two safeguards:
+    // never serve a dangerous extension at all, and even for an allowed
+    // one, force a download instead of letting the browser render it
+    // inline — closes the stored-XSS-via-upload path regardless of what
+    // Content-Type auto-detection would otherwise have picked.
+    const ext = path.extname(req.params.filename).toLowerCase();
+    if (DANGEROUS_UPLOAD_EXTENSIONS.has(ext)) {
+      return res.status(403).send('This file type cannot be served for security reasons.');
+    }
+    res.setHeader('Content-Disposition', 'attachment');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+  }
   res.sendFile(filepath);
 });
 

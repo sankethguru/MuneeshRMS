@@ -26,7 +26,11 @@ function stringify(rows) {
   return rows.map(stringifyRow).join('\r\n') + '\r\n';
 }
 
-// Returns an array of rows, each an array of string cells.
+// Returns an array of rows, each an array of string cells. Throws a clear
+// error (rather than silently swallowing everything after a stray quote
+// into one runaway field) if the input ends with a quoted field still
+// open — a mismatched/missing closing quote, which otherwise produces
+// silently misaligned columns instead of an obvious failure.
 function parse(text) {
   const rows = [];
   let row = [];
@@ -53,6 +57,10 @@ function parse(text) {
     } else {
       field += c;
     }
+  }
+  if (inQuotes) {
+    const rowNum = rows.length + 1;
+    throw new Error(`CSV parse error: an opening quote on or after row ${rowNum} is never closed — check for a stray " in the file.`);
   }
   if (field !== '' || row.length > 0) { row.push(field); rows.push(row); }
   return rows.filter(r => !(r.length === 1 && r[0] === ''));

@@ -1659,6 +1659,14 @@ router.post('/:entity/import', uploadCsvMiddleware, (req, res) => {
 
     dataRows.forEach((cells, idx) => {
       const rowNum = idx + 2; // header row + 1-indexed
+      // A malformed row (usually a stray quote earlier in the file
+      // throwing off comma/newline boundaries for everything after it)
+      // produces a row with the wrong number of cells — catch that
+      // explicitly here with a row-numbered error, rather than silently
+      // importing blank/shifted values for the missing trailing columns.
+      if (cells.length !== headers.length) {
+        throw new Error(`Row ${rowNum} has ${cells.length} column(s), but the header row has ${headers.length} — check for a stray comma or unmatched quote earlier in the file (often in an earlier row, not necessarily this one). No rows were imported.`);
+      }
       const raw = {};
       headers.forEach((h, ci) => { raw[h] = cells[ci] !== undefined ? cells[ci] : ''; });
 
@@ -2102,9 +2110,9 @@ router.get('/users/new', (req, res) => {
   res.render('admin/user-form', { schema: req.schema, user: null, error: req.query.error });
 });
 
-router.post('/users', (req, res) => {
+router.post('/users', async (req, res) => {
   try {
-    const user = usersLib.createUser({
+    const user = await usersLib.createUser({
       username: req.body.username,
       password: req.body.password,
       isAdmin: req.body.isAdmin === 'on',
@@ -2122,9 +2130,9 @@ router.get('/users/:id/edit', (req, res) => {
   res.render('admin/user-form', { schema: req.schema, user, error: req.query.error });
 });
 
-router.post('/users/:id', (req, res) => {
+router.post('/users/:id', async (req, res) => {
   try {
-    usersLib.updateUser(req.params.id, {
+    await usersLib.updateUser(req.params.id, {
       username: req.body.username,
       password: req.body.password || null,
       isAdmin: req.body.isAdmin === 'on',

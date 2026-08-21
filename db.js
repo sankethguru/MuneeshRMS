@@ -178,8 +178,23 @@ function getChildren(entityKey, fkField, value) {
   return rows.filter(r => String(r[fkField]) === String(value));
 }
 
+// All the read-then-write functions below intentionally use loadRaw()
+// (always a fresh disk read) rather than currentData() (which may return
+// a request-scoped snapshot loaded before this request's own async work
+// began) for their read step specifically — closing the class of
+// last-write-wins race where a route awaits something slow (PDF
+// generation, an SMTP send) and then writes using data that's gone
+// stale relative to what another request may have committed to disk in
+// the meantime. Every one of these functions stays fully synchronous —
+// no route/module anywhere needs to change how it calls them — because
+// Node's single-threaded event loop already guarantees a synchronous
+// read-mutate-write block like this can't be interleaved by another
+// request's code; the only actual gap was ever "written using data read
+// before an earlier await," never "two writes racing each other."
+// save() still refreshes the CURRENT request's own cache afterward (see
+// below), so later reads in the same request see this write's result.
 function insert(entityKey, record) {
-  const data = currentData();
+  const data = loadRaw();
   if (!data[entityKey]) data[entityKey] = [];
   data[entityKey].push(record);
   save(data);
@@ -187,7 +202,7 @@ function insert(entityKey, record) {
 }
 
 function update(entityKey, pkField, id, updates) {
-  const data = currentData();
+  const data = loadRaw();
   const rows = data[entityKey] || [];
   const idx = rows.findIndex(r => String(r[pkField]) === String(id));
   if (idx === -1) return null;
@@ -202,7 +217,7 @@ function update(entityKey, pkField, id, updates) {
 // Trash view's "Delete Forever" / scheduled 30-day purge, not by the
 // normal record delete route anymore (see softDelete below).
 function remove(entityKey, pkField, id) {
-  const data = currentData();
+  const data = loadRaw();
   const rows = data[entityKey] || [];
   data[entityKey] = rows.filter(r => String(r[pkField]) !== String(id));
   save(data);
@@ -218,7 +233,7 @@ function softDelete(entityKey, pkField, id, username) {
 }
 
 function restore(entityKey, pkField, id) {
-  const data = currentData();
+  const data = loadRaw();
   const rows = data[entityKey] || [];
   const idx = rows.findIndex(r => String(r[pkField]) === String(id));
   if (idx === -1) return null;
@@ -237,7 +252,7 @@ function restore(entityKey, pkField, id) {
 // whole table batch, which matters when a migration runs on a table
 // with thousands of rows.
 function dropFieldFromRows(entityKey, fieldName) {
-  const data = currentData();
+  const data = loadRaw();
   const rows = data[entityKey] || [];
   let changed = 0;
   rows.forEach(r => {
@@ -257,7 +272,7 @@ function getTrash(entityKey) {
 // log/telemetry purges where a soft-deleted row is still just a row to drop.
 // Returns the number removed.
 function removeWhere(entityKey, predicate) {
-  const data = currentData();
+  const data = loadRaw();
   const rows = data[entityKey] || [];
   const kept = rows.filter(r => !predicate(r));
   const removed = rows.length - kept.length;

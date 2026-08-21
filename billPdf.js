@@ -26,6 +26,39 @@ function findChromePath() {
   return null;
 }
 
+// Defense-in-depth for PDF rendering: a template's HTML is admin-authored
+// (trusted by design — this is the same unavoidable trust boundary any
+// HTML templating feature has, see the security note in schema.js's
+// mergeFieldTags), and every record/report value merged into it is
+// already HTML-escaped before it gets here. But Chromium running with
+// --no-sandbox means if anything ever DID get unexpected content into
+// the HTML (a future escaping bug, a compromised admin account), simply
+// RENDERING it — no code execution needed — could reach an internal
+// service (SSRF, e.g. a cloud metadata endpoint via <iframe src="http://
+// 169.254.169.254/...">) or read a local file (LFI via a file:// URL).
+// Closing that risk class entirely, regardless of what ever ends up in
+// the HTML: block every network/file request during rendering except
+// data: URLs (how the app's own image merge tags embed an uploaded
+// image — a base64 data URI built server-side, never a fetch) and the
+// two Google Fonts domains templates are known to actually use.
+const ALLOWED_EXTERNAL_HOSTS = new Set([
+  'fonts.googleapis.com',
+  'fonts.gstatic.com',
+]);
+
+function installRequestGuard(page) {
+  page.setRequestInterception(true);
+  page.on('request', (request) => {
+    const url = request.url();
+    if (url.startsWith('data:') || url.startsWith('about:')) return request.continue();
+    try {
+      const { protocol, hostname } = new URL(url);
+      if (protocol === 'https:' && ALLOWED_EXTERNAL_HOSTS.has(hostname)) return request.continue();
+    } catch (e) { /* malformed/unparseable URL — fall through to abort */ }
+    request.abort();
+  });
+}
+
 async function htmlToPdfBuffer(html, options) {
   const landscape = !!(options && options.landscape);
   const executablePath = findChromePath();
@@ -38,6 +71,7 @@ async function htmlToPdfBuffer(html, options) {
   });
   try {
     const page = await browser.newPage();
+    installRequestGuard(page);
     await page.setContent(html, { waitUntil: 'networkidle0' });
     const buffer = await page.pdf({
       format: 'A4',

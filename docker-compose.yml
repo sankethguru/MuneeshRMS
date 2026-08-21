@@ -11,9 +11,10 @@ services:
       # Set a real value in a ".env" file next to this compose file (a
       # line like SESSION_SECRET=<random string>, e.g. from
       # `openssl rand -hex 32`) — this is what actually signs/verifies
-      # session cookies. Without it, the app falls back to a hardcoded
-      # development secret and prints a loud warning on startup; that
-      # fallback should never be relied on for anything real.
+      # session cookies. The Dockerfile sets NODE_ENV=production, so
+      # without this the container will refuse to boot at all (rather
+      # than silently falling back to a known, hardcoded dev secret) —
+      # set this before starting for real.
       - SESSION_SECRET=${SESSION_SECRET:-}
 
 volumes:

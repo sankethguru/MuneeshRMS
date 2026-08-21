@@ -88,10 +88,80 @@ function log({ entityKey, recordId, action, username, before, after }) {
   fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + '\n');
 }
 
+// Reads a single file backward in fixed-size chunks, yielding each
+// complete line newest-first (the file's last line first), without ever
+// holding the whole file in memory at once — the actual fix for
+// readAllEntries()'s previous "read + JSON.parse everything, every call,
+// even when the caller only wants a few recent/matching entries" cost.
+// Safe to rely on line-per-entry here specifically because every entry
+// is written via JSON.stringify (log(), below), which never itself
+// emits a literal newline byte inside a value — a JSONL line and a
+// audit entry are always exactly the same thing, no multi-line-field
+// edge case to worry about the way a general text/CSV reader would.
+// A line spanning a chunk boundary is correctly reassembled via a
+// carry-over fragment; chunk size (64KB) is generous relative to a
+// single audit line's real size (well under 1KB typically).
+function* reverseLines(filePath) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+  } catch (e) {
+    return; // file doesn't exist — nothing to yield, not an error
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    let position = stat.size;
+    const CHUNK_SIZE = 65536;
+    let carry = ''; // an incomplete line fragment, its true start further back in the file
+    while (position > 0) {
+      const readSize = Math.min(CHUNK_SIZE, position);
+      position -= readSize;
+      const buffer = Buffer.alloc(readSize);
+      fs.readSync(fd, buffer, 0, readSize, position);
+      const lines = (buffer.toString('utf8') + carry).split('\n');
+      // lines[0] may be an incomplete fragment (its real start is in an
+      // earlier, not-yet-read chunk) — unless this chunk reaches all
+      // the way back to byte 0 of the file, in which case it's genuinely
+      // the file's first complete line.
+      carry = position > 0 ? lines.shift() : '';
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i] !== '') yield lines[i];
+      }
+    }
+    if (carry !== '') yield carry;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+// Yields parsed audit entries newest-first across both log files (the
+// current file first — it holds the newest entries — then the backup),
+// stopping as soon as the caller's onEntry callback returns false. This
+// is what makes getForRecord()/getRecent() cheap even against a near-
+// full-size (~10MB combined) audit log: both usually only need a
+// handful of matching/recent entries, so most calls now touch only the
+// first chunk or two of the current file, not the whole thing. A line
+// that fails to parse (e.g. a mid-write truncation from a crash) is
+// skipped rather than aborting the whole read, same as before.
+function forEachEntryReverse(onEntry) {
+  migrateOldFormatIfNeeded();
+  ensureDir();
+  for (const filePath of [LOG_FILE, LOG_BACKUP]) {
+    for (const line of reverseLines(filePath)) {
+      let entry;
+      try { entry = JSON.parse(line); } catch (e) { continue; }
+      if (onEntry(entry) === false) return;
+    }
+  }
+}
+
 // Reads and parses every entry from the backup + current JSONL files, in
 // file (chronological) order. A line that fails to parse (e.g. a
 // mid-write truncation from a crash) is skipped rather than aborting the
-// whole read — one bad line shouldn't hide all the good ones.
+// whole read — one bad line shouldn't hide all the good ones. Kept for
+// anyone who genuinely wants the complete list — getForRecord/getRecent
+// below no longer use this, since both only need a bounded subset and
+// now stream via forEachEntryReverse instead.
 function readAllEntries() {
   migrateOldFormatIfNeeded();
   ensureDir();
@@ -104,14 +174,20 @@ function readAllEntries() {
 }
 
 function getForRecord(entityKey, recordId) {
-  return readAllEntries()
-    .filter(e => e.entity === entityKey && e.recordId === String(recordId))
-    .reverse(); // newest first — file order is chronological (oldest first)
+  const matches = [];
+  forEachEntryReverse((e) => {
+    if (e.entity === entityKey && e.recordId === String(recordId)) matches.push(e);
+  });
+  return matches; // already newest-first, since forEachEntryReverse walks backward
 }
 
 function getRecent(limit) {
-  const entries = readAllEntries().reverse(); // newest first
-  return limit ? entries.slice(0, limit) : entries;
+  const entries = [];
+  forEachEntryReverse((e) => {
+    entries.push(e);
+    if (limit && entries.length >= limit) return false; // stop early — no need to read further back
+  });
+  return entries;
 }
 
 module.exports = { log, getForRecord, getRecent };

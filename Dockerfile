@@ -35,6 +35,7 @@ RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit
 COPY . .
 
 ENV PORT=2299
+ENV NODE_ENV=production
 EXPOSE 2299
 
 VOLUME ["/app/data"]

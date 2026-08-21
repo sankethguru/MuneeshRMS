@@ -67,7 +67,7 @@
 </div>
 
 <script>
-  var TENANTS = <%- JSON.stringify(tenants) %>;
+  var TENANTS = <%- JSON.stringify(tenants).replace(/<\//g, '<\\/') %>;
   document.getElementById('tenantPicker').addEventListener('change', function () {
     var code = this.value;
     document.getElementById('TJR_Tenant').value = code;

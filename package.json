@@ -1,6 +1,6 @@
 {
   "name": "muneesh-legacy",
-  "version": "4.3.0",
+  "version": "4.3.2",
   "description": "Muneesh Legacy - Rental & Property Management",
   "main": "server.js",
   "scripts": {

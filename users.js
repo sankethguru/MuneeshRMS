@@ -48,17 +48,17 @@ function getByUsername(username) {
   return load().users.find(u => u.username.toLowerCase() === String(username || '').toLowerCase());
 }
 
-function verifyPassword(username, password) {
+async function verifyPassword(username, password) {
   const user = getByUsername(username);
   if (!user) return null;
-  return bcrypt.compareSync(password || '', user.passwordHash) ? user : null;
+  return (await bcrypt.compare(password || '', user.passwordHash)) ? user : null;
 }
 
 function countAdmins(data) {
   return data.users.filter(u => u.isAdmin).length;
 }
 
-function createUser({ username, password, isAdmin, permissions }) {
+async function createUser({ username, password, isAdmin, permissions }) {
   if (!username || !username.trim()) throw new Error('Username is required.');
   if (!password || password.length < 8) throw new Error('Password must be at least 8 characters.');
   const data = load();
@@ -68,7 +68,7 @@ function createUser({ username, password, isAdmin, permissions }) {
   const user = {
     id: data.nextId++,
     username: username.trim(),
-    passwordHash: bcrypt.hashSync(password, 10),
+    passwordHash: await bcrypt.hash(password, 10),
     isAdmin: !!isAdmin,
     permissions: permissions || {},
     // An admin-assigned password is a known value someone other than
@@ -84,7 +84,7 @@ function createUser({ username, password, isAdmin, permissions }) {
   return user;
 }
 
-function updateUser(id, { username, password, isAdmin, permissions }) {
+async function updateUser(id, { username, password, isAdmin, permissions }) {
   const data = load();
   const user = data.users.find(u => String(u.id) === String(id));
   if (!user) throw new Error('Unknown user.');
@@ -96,7 +96,7 @@ function updateUser(id, { username, password, isAdmin, permissions }) {
   }
   if (password) {
     if (password.length < 8) throw new Error('Password must be at least 8 characters.');
-    user.passwordHash = bcrypt.hashSync(password, 10);
+    user.passwordHash = await bcrypt.hash(password, 10);
     user.mustChangePassword = false;
   }
   const wasAdmin = user.isAdmin;
@@ -120,12 +120,12 @@ function deleteUser(id) {
   persist(data);
 }
 
-function changeOwnPassword(id, newPassword) {
+async function changeOwnPassword(id, newPassword) {
   const data = load();
   const user = data.users.find(u => String(u.id) === String(id));
   if (!user) throw new Error('Unknown user.');
   if (!newPassword || newPassword.length < 4) throw new Error('Password must be at least 4 characters.');
-  user.passwordHash = bcrypt.hashSync(newPassword, 10);
+  user.passwordHash = await bcrypt.hash(newPassword, 10);
   user.mustChangePassword = false;
   persist(data);
   return user;
